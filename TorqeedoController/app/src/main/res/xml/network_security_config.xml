@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    BLE-only app — no network traffic.
+    Kept as a placeholder so the manifest attribute is satisfied
+    if you add any future HTTP debugging endpoints.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

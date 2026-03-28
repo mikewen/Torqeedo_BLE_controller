@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Backgrounds -->
+    <color name="bg_primary">#0F1117</color>
+    <color name="bg_surface">#1A1D27</color>
+
+    <!-- Text -->
+    <color name="text_primary">#F0F0F5</color>
+    <color name="text_secondary">#7A7D8E</color>
+
+    <!-- Accent — nautical teal -->
+    <color name="accent_primary">#00C4A3</color>
+    <color name="accent_dark">#00977E</color>
+
+    <!-- Status -->
+    <color name="status_connected">#00C4A3</color>
+    <color name="status_connecting">#F5A623</color>
+    <color name="status_disconnected">#E05555</color>
+
+    <!-- Borders -->
+    <color name="border_subtle">#2A2D3A</color>
+
+    <!-- FWD button — teal (normal / pressed) -->
+    <color name="btn_fwd_bg">#00C4A3</color>
+    <color name="btn_fwd_pressed">#00977E</color>
+
+    <!-- REV button — amber (normal / pressed) -->
+    <color name="btn_rev_bg">#F5A623</color>
+    <color name="btn_rev_pressed">#C07A0A</color>
+</resources>

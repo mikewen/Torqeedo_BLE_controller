@@ -1,0 +1,59 @@
+# ── Gradle ────────────────────────────────────────────────────────────────
+.gradle/
+build/
+**/build/
+gradle-app.setting
+!gradle-wrapper.jar
+.gradletasknamecache
+
+# ── Android Studio / IntelliJ ─────────────────────────────────────────────
+.idea/
+*.iml
+*.iws
+*.ipr
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# ── APKs & AABs (never commit binaries) ──────────────────────────────────
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# ── Keystore — NEVER commit signing keys ─────────────────────────────────
+*.jks
+*.keystore
+keystore.properties
+release/
+
+# ── Generated / cache ─────────────────────────────────────────────────────
+gen/
+out/
+bin/
+proguard/
+*.class
+
+# ── OS artefacts ──────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs & crash reports ──────────────────────────────────────────────────
+*.log
+lint-results/
+lint-results.xml
+lint-results-*.html
+
+# ── Test output ───────────────────────────────────────────────────────────
+test-results/
+jacoco/
+
+# ── NDK / CMake ───────────────────────────────────────────────────────────
+.externalNativeBuild/
+cmake-build-*/
+
+# ── Keep gradle wrapper ───────────────────────────────────────────────────
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
