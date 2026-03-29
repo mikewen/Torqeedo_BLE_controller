@@ -1,23 +1,21 @@
 package com.torqeedo.controller.viewmodel
 
+import android.annotation.SuppressLint
 import android.app.Application
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import android.os.Looper
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.android.gms.location.*
 import com.torqeedo.controller.ble.BleScanner
 import com.torqeedo.controller.ble.DiscoveredDevice
 import com.torqeedo.controller.ble.TorqeedoBleManager
 import com.torqeedo.controller.protocol.TorqeedoProtocol
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -31,7 +29,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val DEFAULT_SPEED_STEP = 20        // 2% steps
         private const val DEFAULT_AUTO_DELAY = 200L      // 5 steps per second (10% / sec)
         private const val DEFAULT_THROTTLE_DELAY = 200L  // 5 Hz throttle loop
-        //private const val STATUS_QUERY_DELAY = 500L      // 2 Hz status query
+        private const val STATUS_QUERY_DELAY = 500L      // 2 Hz status query
     }
 
     // Configurable parameters as StateFlows
@@ -80,9 +78,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (dir == Direction.FORWARD) mag else -mag
         }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
+    // GPS State
+    private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(application)
+    
+    private val _gpsSpeedKnots = MutableStateFlow(0.0f)
+    val gpsSpeedKnots: StateFlow<Float> = _gpsSpeedKnots.asStateFlow()
+
+    private val _gpsCourse = MutableStateFlow<Int?>(null)
+    val gpsCourse: StateFlow<Int?> = _gpsCourse.asStateFlow()
+
+    private val _gpsFix = MutableStateFlow(false)
+    val gpsFix: StateFlow<Boolean> = _gpsFix.asStateFlow()
+
     private var throttleJob: Job? = null
     private var statusQueryJob: Job? = null
     private var autoAdjustmentJob: Job? = null
+
+    // ── GPS ───────────────────────────────────────────────────────────────
+    private val locationCallback = object : LocationCallback() {
+        override fun onLocationResult(locationResult: LocationResult) {
+            val location = locationResult.lastLocation ?: return
+            _gpsFix.value = true
+            
+            // Speed in m/s to knots (1 m/s ≈ 1.94384 knots)
+            _gpsSpeedKnots.value = location.speed * 1.94384f
+            
+            if (location.hasBearing()) {
+                _gpsCourse.value = location.bearing.toInt()
+            }
+        }
+
+        override fun onLocationAvailability(availability: LocationAvailability) {
+            _gpsFix.value = availability.isLocationAvailable
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun startGpsUpdates() {
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L)
+            .setMinUpdateIntervalMillis(500L)
+            .build()
+        fusedLocationClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
+    }
+
+    fun stopGpsUpdates() {
+        fusedLocationClient.removeLocationUpdates(locationCallback)
+        _gpsFix.value = false
+    }
 
     // ── Scan ──────────────────────────────────────────────────────────────
     fun setScanAllNames(scanAll: Boolean) {
@@ -110,12 +152,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 bleManager.connectToDevice(device.device)
                 startLoops()
+                startGpsUpdates()
             } catch (_: Exception) {}
         }
     }
 
     fun disconnect() {
         stopLoops()
+        stopGpsUpdates()
         bleManager.disconnectDevice()
     }
 
@@ -177,7 +221,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // ── Loops ─────────────────────────────────────────────────────────────
     private fun startLoops() {
         startThrottleLoop()
-        //startStatusQueryLoop()
+        startStatusQueryLoop()
     }
 
     private fun stopLoops() {
@@ -203,17 +247,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         bleManager.sendDrive(0)
     }
 
-//    private fun startStatusQueryLoop() {
-//        statusQueryJob?.cancel()
-//        statusQueryJob = viewModelScope.launch {
-//            while (true) {
-//                if (connectionState.value == TorqeedoBleManager.ConnectionState.CONNECTED) {
-//                    bleManager.sendStatusQuery()
-//                }
-//                delay(STATUS_QUERY_DELAY)
-//            }
-//        }
-//    }
+    private fun startStatusQueryLoop() {
+        statusQueryJob?.cancel()
+        statusQueryJob = viewModelScope.launch {
+            while (true) {
+                if (connectionState.value == TorqeedoBleManager.ConnectionState.CONNECTED) {
+                    bleManager.sendStatusQuery()
+                }
+                delay(STATUS_QUERY_DELAY)
+            }
+        }
+    }
 
     private fun stopStatusQueryLoop() {
         statusQueryJob?.cancel()
@@ -223,6 +267,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         super.onCleared()
         stopLoops()
+        stopGpsUpdates()
         bleManager.disconnectDevice()
     }
 }

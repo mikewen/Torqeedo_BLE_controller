@@ -22,7 +22,6 @@ import com.google.android.material.snackbar.Snackbar
 import com.torqeedo.controller.R
 import com.torqeedo.controller.ble.TorqeedoBleManager
 import com.torqeedo.controller.databinding.ActivityMainBinding
-import com.torqeedo.controller.protocol.TorqeedoProtocol
 import com.torqeedo.controller.viewmodel.MainViewModel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -39,8 +38,11 @@ class MainActivity : AppCompatActivity() {
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        if (results.values.all { it }) ensureBluetoothEnabled()
-        else showSnack("Bluetooth permissions are required.")
+        if (results.values.all { it }) {
+            ensureBluetoothEnabled()
+        } else {
+            showSnack("Permissions (Bluetooth & Location) are required for GPS and BLE.")
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -92,17 +94,17 @@ class MainActivity : AppCompatActivity() {
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     v.isPressed = true
-                    vm.increaseSpeed() // Single click action on down
+                    vm.increaseSpeed()
                     v.postDelayed({
                         if (v.isPressed) vm.startAutoIncrease()
-                    }, 400) // Start auto-repeat after 400ms delay
+                    }, 400)
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     vm.stopAutoAdjustment()
                     v.isPressed = false
                 }
             }
-            true // Consume event
+            true
         }
 
         // Speed Decrease Button
@@ -110,17 +112,17 @@ class MainActivity : AppCompatActivity() {
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     v.isPressed = true
-                    vm.decreaseSpeed() // Single click action on down
+                    vm.decreaseSpeed()
                     v.postDelayed({
                         if (v.isPressed) vm.startAutoDecrease()
-                    }, 400) // Start auto-repeat after 400ms delay
+                    }, 400)
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     vm.stopAutoAdjustment()
                     v.isPressed = false
                 }
             }
-            true // Consume event
+            true
         }
 
         // Stop Button
@@ -141,20 +143,6 @@ class MainActivity : AppCompatActivity() {
     private fun observeState() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-//                launch {
-//                    vm.enableLogging.collectLatest { enabled ->
-//                        if (binding.switchLogging.isChecked != enabled) {
-//                            binding.switchLogging.isChecked = enabled
-//                        }
-//                        // Enable/disable file logging
-//                        if (enabled) {
-//                            TorqeedoProtocol.enableLogging(applicationContext)
-//                        } else {
-//                            TorqeedoProtocol.disableLogging()
-//                        }
-//                    }
-//                }
-
                 launch {
                     vm.connectionState.collectLatest { state ->
                         when (state) {
@@ -216,18 +204,24 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
+                // GPS Data Observation
                 launch {
-                    vm.motorStatus.collectLatest { status ->
-                        status ?: return@collectLatest
-                        status.rpm?.let { binding.tvRpm.text = "$it" }
-                        status.powerW?.let { binding.tvPower.text = "$it" }
-                        status.tempC?.let { binding.tvTemp.text = "$it" }
+                    vm.gpsSpeedKnots.collectLatest { knots ->
+                        binding.tvGpsSpeed.text = "%.1f".format(knots)
+                    }
+                }
 
-                        binding.tvError.text = TorqeedoProtocol.errorDescription(status.errorCode)
-                        binding.tvError.setTextColor(
-                            ContextCompat.getColor(this@MainActivity,
-                                if (status.hasError) R.color.status_disconnected
-                                else R.color.status_connected))
+                launch {
+                    vm.gpsCourse.collectLatest { course ->
+                        binding.tvGpsCourse.text = course?.let { "$it°" } ?: "—"
+                    }
+                }
+
+                launch {
+                    vm.gpsFix.collectLatest { hasFix ->
+                        binding.tvGpsStatus.text = if (hasFix) "GPS Fixed" else "Waiting for GPS fix…"
+                        binding.tvGpsStatus.setTextColor(ContextCompat.getColor(this@MainActivity,
+                            if (hasFix) R.color.status_connected else R.color.text_secondary))
                     }
                 }
 
@@ -267,13 +261,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestPermissionsIfNeeded() {
-        val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+        val perms = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            perms.add(Manifest.permission.BLUETOOTH_SCAN)
+            perms.add(Manifest.permission.BLUETOOTH_CONNECT)
         } else {
-            arrayOf(Manifest.permission.BLUETOOTH, Manifest.permission.BLUETOOTH_ADMIN,
-                Manifest.permission.ACCESS_FINE_LOCATION)
+            perms.add(Manifest.permission.BLUETOOTH)
+            perms.add(Manifest.permission.BLUETOOTH_ADMIN)
         }
-        permissionLauncher.launch(perms)
+        
+        permissionLauncher.launch(perms.toTypedArray())
     }
 
     private fun ensureBluetoothEnabled() {
