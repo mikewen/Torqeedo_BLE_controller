@@ -141,6 +141,19 @@ class MainActivity : AppCompatActivity() {
     private fun observeState() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
+//                launch {
+//                    vm.enableLogging.collectLatest { enabled ->
+//                        if (binding.switchLogging.isChecked != enabled) {
+//                            binding.switchLogging.isChecked = enabled
+//                        }
+//                        // Enable/disable file logging
+//                        if (enabled) {
+//                            TorqeedoProtocol.enableLogging(applicationContext)
+//                        } else {
+//                            TorqeedoProtocol.disableLogging()
+//                        }
+//                    }
+//                }
 
                 launch {
                     vm.connectionState.collectLatest { state ->

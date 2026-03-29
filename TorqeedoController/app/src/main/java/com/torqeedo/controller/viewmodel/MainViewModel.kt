@@ -30,6 +30,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         
         private const val DEFAULT_SPEED_STEP = 20        // 2% steps
         private const val DEFAULT_AUTO_DELAY = 200L      // 5 steps per second (10% / sec)
+        private const val DEFAULT_THROTTLE_DELAY = 200L  // 5 Hz throttle loop
+        //private const val STATUS_QUERY_DELAY = 500L      // 2 Hz status query
     }
 
     // Configurable parameters as StateFlows
@@ -38,6 +40,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _autoIncrementDelay = MutableStateFlow(DEFAULT_AUTO_DELAY)
     val autoIncrementDelay: StateFlow<Long> = _autoIncrementDelay.asStateFlow()
+
+    private val _throttleDelay = MutableStateFlow(DEFAULT_THROTTLE_DELAY)
+    val throttleDelay: StateFlow<Long> = _throttleDelay.asStateFlow()
 
     private val _scanAllNames = MutableStateFlow(false)
     val scanAllNames: StateFlow<Boolean> = _scanAllNames.asStateFlow()
@@ -76,6 +81,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
     private var throttleJob: Job? = null
+    private var statusQueryJob: Job? = null
     private var autoAdjustmentJob: Job? = null
 
     // ── Scan ──────────────────────────────────────────────────────────────
@@ -103,13 +109,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 bleManager.connectToDevice(device.device)
-                startThrottleLoop()
+                startLoops()
             } catch (_: Exception) {}
         }
     }
 
     fun disconnect() {
-        stopThrottleLoop()
+        stopLoops()
         bleManager.disconnectDevice()
     }
 
@@ -120,6 +126,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateAutoDelay(ms: Long) {
         _autoIncrementDelay.value = ms.coerceIn(50L, 1000L)
+    }
+
+    fun updateThrottleDelay(ms: Long) {
+        _throttleDelay.value = ms.coerceIn(50L, 2000L)
     }
 
     // ── Controls ──────────────────────────────────────────────────────────
@@ -164,7 +174,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         autoAdjustmentJob = null
     }
 
-    // ── 10 Hz throttle loop ───────────────────────────────────────────────
+    // ── Loops ─────────────────────────────────────────────────────────────
+    private fun startLoops() {
+        startThrottleLoop()
+        //startStatusQueryLoop()
+    }
+
+    private fun stopLoops() {
+        stopThrottleLoop()
+        stopStatusQueryLoop()
+    }
+
     private fun startThrottleLoop() {
         throttleJob?.cancel()
         throttleJob = viewModelScope.launch {
@@ -172,7 +192,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (connectionState.value == TorqeedoBleManager.ConnectionState.CONNECTED) {
                     bleManager.sendDrive(currentSpeed.value)
                 }
-                delay(100L)
+                delay(_throttleDelay.value)
             }
         }
     }
@@ -183,9 +203,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         bleManager.sendDrive(0)
     }
 
+//    private fun startStatusQueryLoop() {
+//        statusQueryJob?.cancel()
+//        statusQueryJob = viewModelScope.launch {
+//            while (true) {
+//                if (connectionState.value == TorqeedoBleManager.ConnectionState.CONNECTED) {
+//                    bleManager.sendStatusQuery()
+//                }
+//                delay(STATUS_QUERY_DELAY)
+//            }
+//        }
+//    }
+
+    private fun stopStatusQueryLoop() {
+        statusQueryJob?.cancel()
+        statusQueryJob = null
+    }
+
     override fun onCleared() {
         super.onCleared()
-        stopThrottleLoop()
+        stopLoops()
         bleManager.disconnectDevice()
     }
 }

@@ -199,5 +199,12 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue()
     }
 
+    fun sendStatusQuery() {
+        val char = ae10Char ?: return
+        val frame = TorqeedoProtocol.buildStatusQuery()
+        logToFile("SEND_STAT", frame)
+        writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue()
+    }
+
     enum class ConnectionState { DISCONNECTED, CONNECTING, CONNECTED }
 }
