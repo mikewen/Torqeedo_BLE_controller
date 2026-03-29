@@ -197,6 +197,12 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 launch {
+                    vm.rawStatus.collectLatest { bytes ->
+                        binding.tvRawData.text = if (bytes != null) "Raw: ${bytes.joinToString(" ") { "%02X".format(it) }}" else "Raw: —"
+                    }
+                }
+
+                launch {
                     vm.direction.collectLatest { dir ->
                         binding.tvDirectionLabel.text = dir.name
                         binding.switchDirection.isChecked = (dir == MainViewModel.Direction.REVERSE)

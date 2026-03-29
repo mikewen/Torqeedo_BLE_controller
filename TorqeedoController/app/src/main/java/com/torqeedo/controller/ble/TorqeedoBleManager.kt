@@ -3,7 +3,6 @@ package com.torqeedo.controller.ble
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
-import android.bluetooth.BluetoothGattService
 import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -14,18 +13,18 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import no.nordicsemi.android.ble.BleManager
 import no.nordicsemi.android.ble.ktx.suspend
-import no.nordicsemi.android.ble.ktx.asFlow
 import com.torqeedo.controller.protocol.TorqeedoProtocol
+import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 
 /**
  * Nordic BleManager for the AC6328 BLE-UART bridge.
- *
- * Supported Service UUIDs: 0xAE30, 0xAE00
- * ae10  (WRITE_NO_RESP) — send raw TQ Bus frames to motor
- * ae02  (NOTIFY)        — receive raw TQ Bus STATUS replies from motor
  */
-class TorqeedoBleManager(context: Context) : BleManager(context) {
+class TorqeedoBleManager(private val context: Context) : BleManager(context) {
 
     companion object {
         private const val TAG = "TorqeedoBle"
@@ -40,6 +39,25 @@ class TorqeedoBleManager(context: Context) : BleManager(context) {
     private var ae10Char: BluetoothGattCharacteristic? = null
     private var ae02Char: BluetoothGattCharacteristic? = null
 
+    // ── Logging to File ─────────────────────────────────────────────────────
+    private val logFile: File by lazy {
+        File(context.getExternalFilesDir(null), "torqeedo_ble_log.txt")
+    }
+
+    private fun logToFile(direction: String, data: ByteArray) {
+        try {
+            val timestamp = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
+            val hex = data.joinToString(" ") { "%02X".format(it) }
+            val line = "[$timestamp] $direction: $hex\n"
+            
+            FileOutputStream(logFile, true).use { output ->
+                output.write(line.toByteArray())
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "File log failed", e)
+        }
+    }
+
     // ── Public state ────────────────────────────────────────────────────────
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
@@ -47,7 +65,12 @@ class TorqeedoBleManager(context: Context) : BleManager(context) {
     private val _statusFlow = MutableSharedFlow<TorqeedoProtocol.MotorStatus>(replay = 1)
     val statusFlow: SharedFlow<TorqeedoProtocol.MotorStatus> = _statusFlow.asSharedFlow()
 
-    // ── BleManager overrides ────────────────────────────────────────────────
+    private val _rawStatusFlow = MutableSharedFlow<ByteArray>(replay = 1)
+    val rawStatusFlow: SharedFlow<ByteArray> = _rawStatusFlow.asSharedFlow()
+
+    // ── Buffer for fragmented BLE packets ──────────────────────────────────
+    private val rxBuffer = mutableListOf<Byte>()
+
     override fun getGattCallback(): BleManagerGattCallback = GattCallback()
 
     private inner class GattCallback : BleManagerGattCallback() {
@@ -56,7 +79,7 @@ class TorqeedoBleManager(context: Context) : BleManager(context) {
             val service = gatt.getService(SERVICE_AE30_UUID) 
                 ?: gatt.getService(SERVICE_AE00_UUID)
                 ?: run {
-                    Log.w(TAG, "Compatible Torqeedo service not found (checked 0xAE30 and 0xAE00)")
+                    Log.w(TAG, "Compatible Torqeedo service not found")
                     return false
                 }
 
@@ -66,15 +89,14 @@ class TorqeedoBleManager(context: Context) : BleManager(context) {
         }
 
         override fun initialize() {
-            // Request MTU — AC6328 supports up to 512, 100 is plenty for TQ Bus
             requestMtu(100).enqueue()
 
             setNotificationCallback(ae02Char)
                 .with { _, data ->
                     data.value?.let { bytes ->
-                        TorqeedoProtocol.parseStatus(bytes)?.let { status ->
-                            _statusFlow.tryEmit(status)
-                        } ?: Log.w(TAG, "Malformed STATUS frame: ${bytes.toHex()}")
+                        logToFile("RECV_RAW", bytes)
+                        rxBuffer.addAll(bytes.toList())
+                        processBuffer()
                     }
                 }
             enableNotifications(ae02Char).enqueue()
@@ -86,21 +108,57 @@ class TorqeedoBleManager(context: Context) : BleManager(context) {
         }
     }
 
-    override fun log(priority: Int, message: String) {
-        Log.println(priority, TAG, message)
+    private fun processBuffer() {
+        while (rxBuffer.size >= 5) { // Minimum possible frame: HEADER, ADDR, ID, CRC, FOOTER
+            // Find start of frame (0xAC)
+            val startIdx = rxBuffer.indexOf(TorqeedoProtocol.HEADER)
+            if (startIdx == -1) {
+                rxBuffer.clear()
+                return
+            }
+            if (startIdx > 0) {
+                // Remove garbage before the header
+                repeat(startIdx) { rxBuffer.removeAt(0) }
+            }
+
+            // Find end of frame (0xAD)
+            // Note: Byte stuffing means we must be careful, but FOOTER is never stuffed.
+            val endIdx = rxBuffer.indexOf(TorqeedoProtocol.FOOTER)
+            if (endIdx == -1) {
+                // Frame start found but no footer yet. 
+                // If the buffer is getting too large, drop the header to look for next one.
+                if (rxBuffer.size > 256) rxBuffer.removeAt(0)
+                return
+            }
+
+            // Extract frame
+            val frameLength = endIdx + 1
+            val frame = rxBuffer.take(frameLength).toByteArray()
+            
+            // Consume from buffer
+            repeat(frameLength) { rxBuffer.removeAt(0) }
+
+            // Log and broadcast the extracted frame
+            logToFile("FRAME", frame)
+            _rawStatusFlow.tryEmit(frame)
+            
+            TorqeedoProtocol.parseStatus(frame)?.let { status ->
+                _statusFlow.tryEmit(status)
+            }
+        }
     }
 
-    // ── Connection lifecycle ────────────────────────────────────────────────
     suspend fun connectToDevice(device: BluetoothDevice) {
         _connectionState.value = ConnectionState.CONNECTING
         try {
-            connect(device)
-                .retry(3, 300)
-                .timeout(10_000)
-                .suspend()
+            val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
+            FileOutputStream(logFile, true).use { 
+                it.write("\n--- Session Start: $timestamp (${device.address}) ---\n".toByteArray()) 
+            }
+            rxBuffer.clear()
+            connect(device).retry(3, 300).timeout(10_000).suspend()
             _connectionState.value = ConnectionState.CONNECTED
         } catch (e: Exception) {
-            Log.e(TAG, "Connection failed: ${e.message}")
             _connectionState.value = ConnectionState.DISCONNECTED
             throw e
         }
@@ -111,25 +169,12 @@ class TorqeedoBleManager(context: Context) : BleManager(context) {
         _connectionState.value = ConnectionState.DISCONNECTED
     }
 
-    // ── DRIVE command ───────────────────────────────────────────────────────
-    /**
-     * Send a speed command to the motor.
-     * @param speed  -1000 … +1000
-     */
     fun sendDrive(speed: Int) {
         val char = ae10Char ?: return
         val frame = TorqeedoProtocol.buildDrive(speed)
-        writeCharacteristic(
-            char,
-            frame,
-            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-        ).enqueue()
+        logToFile("SEND", frame)
+        writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue()
     }
 
-    // ── Helpers ─────────────────────────────────────────────────────────────
-    private fun ByteArray.toHex(): String = joinToString(" ") { "0x%02X".format(it) }
-
-    enum class ConnectionState {
-        DISCONNECTED, CONNECTING, CONNECTED
-    }
+    enum class ConnectionState { DISCONNECTED, CONNECTING, CONNECTED }
 }

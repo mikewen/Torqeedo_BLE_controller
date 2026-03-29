@@ -53,6 +53,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isScanning:      StateFlow<Boolean>                            = scanner.isScanning
     val motorStatus:     StateFlow<TorqeedoProtocol.MotorStatus?>      =
         bleManager.statusFlow.stateIn(viewModelScope, SharingStarted.Lazily, null)
+    
+    val rawStatus: StateFlow<ByteArray?> = 
+        bleManager.rawStatusFlow.stateIn(viewModelScope, SharingStarted.Lazily, null)
 
     private val _direction = MutableStateFlow(Direction.FORWARD)
     val direction: StateFlow<Direction> = _direction.asStateFlow()
