@@ -42,6 +42,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _scanAllNames = MutableStateFlow(false)
     val scanAllNames: StateFlow<Boolean> = _scanAllNames.asStateFlow()
 
+    // Debug settings
+    private val _showRawData = MutableStateFlow(true)
+    val showRawData: StateFlow<Boolean> = _showRawData.asStateFlow()
+
+    private val _enableLogging = MutableStateFlow(true)
+    val enableLogging: StateFlow<Boolean> = _enableLogging.asStateFlow()
+
     private val bluetoothAdapter: BluetoothAdapter =
         (application.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
 
@@ -78,6 +85,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startScan() = scanner.startScan(_scanAllNames.value)
     fun stopScan()  = scanner.stopScan()
+
+    // ── Debug ─────────────────────────────────────────────────────────────
+    fun setShowRawData(show: Boolean) {
+        _showRawData.value = show
+        bleManager.setRawDataEnabled(show)
+    }
+
+    fun setEnableLogging(enabled: Boolean) {
+        _enableLogging.value = enabled
+        bleManager.setLoggingEnabled(enabled)
+    }
 
     // ── Connect / disconnect ──────────────────────────────────────────────
     fun connect(device: DiscoveredDevice) {

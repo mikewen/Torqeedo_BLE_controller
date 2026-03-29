@@ -69,6 +69,14 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupControls() {
+        // Debug Settings
+        binding.switchShowRaw.setOnCheckedChangeListener { _, isChecked ->
+            vm.setShowRawData(isChecked)
+        }
+        binding.switchLogging.setOnCheckedChangeListener { _, isChecked ->
+            vm.setEnableLogging(isChecked)
+        }
+
         // Scan Settings
         binding.switchScanAll.setOnCheckedChangeListener { _, isChecked ->
             vm.setScanAllNames(isChecked)
@@ -183,11 +191,25 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 launch {
+                    vm.showRawData.collectLatest { show ->
+                        binding.switchShowRaw.isChecked = show
+                        binding.tvRawData.visibility = if (show) View.VISIBLE else View.GONE
+                    }
+                }
+
+                launch {
+                    vm.enableLogging.collectLatest { enabled ->
+                        binding.switchLogging.isChecked = enabled
+                    }
+                }
+
+                launch {
                     vm.motorStatus.collectLatest { status ->
                         status ?: return@collectLatest
-                        binding.tvRpm.text   = "${status.rpm}"
-                        binding.tvPower.text = "${status.powerW}"
-                        binding.tvTemp.text  = "${status.tempC}"
+                        status.rpm?.let { binding.tvRpm.text = "$it" }
+                        status.powerW?.let { binding.tvPower.text = "$it" }
+                        status.tempC?.let { binding.tvTemp.text = "$it" }
+
                         binding.tvError.text = TorqeedoProtocol.errorDescription(status.errorCode)
                         binding.tvError.setTextColor(
                             ContextCompat.getColor(this@MainActivity,

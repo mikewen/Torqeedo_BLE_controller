@@ -38,6 +38,51 @@
             android:textSize="13sp" />
     </LinearLayout>
 
+    <!-- DEBUG SETTINGS -->
+    <LinearLayout
+        android:id="@+id/debugSettings"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/bg_surface"
+        android:orientation="horizontal"
+        android:paddingHorizontal="20dp"
+        android:paddingVertical="4dp"
+        android:gravity="center_vertical"
+        app:layout_constraintTop_toBottomOf="@id/statusBar">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Show Raw"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
+            android:layout_marginEnd="8dp"/>
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switchShowRaw"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            app:switchMinWidth="32dp" />
+
+        <View android:layout_width="24dp" android:layout_height="match_parent"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="File Log"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
+            android:layout_marginEnd="8dp" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switchLogging"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            app:switchMinWidth="32dp" />
+    </LinearLayout>
+
     <!-- SCAN PANEL -->
     <LinearLayout
         android:id="@+id/scanPanel"
@@ -45,7 +90,7 @@
         android:layout_height="0dp"
         android:orientation="vertical"
         android:padding="20dp"
-        app:layout_constraintTop_toBottomOf="@id/statusBar"
+        app:layout_constraintTop_toBottomOf="@id/debugSettings"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent">
 
@@ -114,7 +159,7 @@
         android:orientation="vertical"
         android:padding="16dp"
         android:visibility="gone"
-        app:layout_constraintTop_toBottomOf="@id/statusBar"
+        app:layout_constraintTop_toBottomOf="@id/debugSettings"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent">
 

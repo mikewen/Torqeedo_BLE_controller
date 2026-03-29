@@ -4,7 +4,7 @@ import kotlin.math.abs
 
 /**
  * TQ Bus protocol — Option B implementation.
- * Updated to match the user's Python test snippet with dynamic power scaling.
+ * Updated to match the user's Python test snippet and observed BLE logs.
  */
 object TorqeedoProtocol {
 
@@ -67,55 +67,92 @@ object TorqeedoProtocol {
     }
 
     data class MotorStatus(
-        val rpm: Int,
-        val powerW: Int,
-        val tempC: Int,
-        val errorCode: Int,
-        val rawBytes: ByteArray
+        val rpm: Int? = null,
+        val powerW: Int? = null,
+        val tempC: Int? = null,
+        val errorCode: Int? = null,
+        val rawBytes: ByteArray? = null
     ) {
-        val hasError get() = errorCode != 0
+        val hasError get() = (errorCode ?: 0) != 0
     }
 
     /**
-     * Un-escape and parse a STATUS frame.
+     * More flexible parser for various TQ Bus frames seen in the logs.
      */
     fun parseStatus(raw: ByteArray): MotorStatus? {
-        if (raw.size < 6) return null
-        if (raw.first() != HEADER) return null
-        if (raw.last()  != FOOTER) return null
-
+        if (raw.isEmpty() || raw[0] != HEADER) return null
+        
+        // Un-escape the payload (excluding HEADER and optional FOOTER)
+        val hasFooter = raw.last() == FOOTER
+        val endIdx = if (hasFooter) raw.size - 1 else raw.size
+        
         val payload = mutableListOf<Byte>()
         var i = 1
-        while (i < raw.size - 1) {
-            if (raw[i] == ESCAPE) {
+        while (i < endIdx) {
+            if (raw[i] == ESCAPE && i + 1 < endIdx) {
                 i++
-                if (i >= raw.size - 1) return null
                 payload.add((raw[i].toInt() xor ESC_XOR).toByte())
             } else {
                 payload.add(raw[i])
             }
             i++
         }
+        
+        if (payload.size < 2) return null
+        
+        val addr = payload[0].toInt() and 0xFF
+        val id   = payload[1].toInt() and 0xFF
+        
+        // 1. Handle the standard 0x30 / 0x81 status if it appears
+        if (addr == 0x30 && id == 0x81 && payload.size >= 9) {
+             val crcRx   = payload.last()
+             val crcCalc = crc8Maxim(payload.toByteArray(), payload.size - 1)
+             if (crcRx == crcCalc) {
+                 fun s16(hi: Byte, lo: Byte): Int =
+                    ((hi.toInt() and 0xFF) shl 8) or (lo.toInt() and 0xFF)
+                 
+                 return MotorStatus(
+                    rpm       = s16(payload[2], payload[3]).let { if (it > 32767) it - 65536 else it },
+                    powerW    = s16(payload[4], payload[5]).let { if (it > 32767) it - 65536 else it },
+                    tempC     = payload[6].toInt(),
+                    errorCode = payload[7].toInt() and 0xFF,
+                    rawBytes  = raw
+                )
+             }
+        }
 
-        // Expected Status Payload: ADDR(0x30), ID(0x81), RPM_H, RPM_L, PWR_H, PWR_L, TEMP, ERR, CRC
-        if (payload.size < 9) return null
-        val crcRx   = payload.last()
-        val crcCalc = crc8Maxim(payload.toByteArray(), payload.size - 1)
-        if (crcRx != crcCalc) return null
+        // 2. Handle the 0xA7 and other messages seen in user logs
+        if (addr == 0xA7 || addr == 0x30 || addr == 0xC5) {
+            return when (id) {
+                0xC4, 0xE0, 0x10, 0x60 -> { // IDs often seen with 2-byte data trailing
+                    if (payload.size >= 5) {
+                        // Pattern in logs suggests Little Endian signed 16-bit
+                        fun s16le(lo: Byte, hi: Byte): Int =
+                            ((hi.toInt() and 0xFF) shl 8) or (lo.toInt() and 0xFF)
+                        
+                        val value = s16le(payload[payload.size - 2], payload[payload.size - 1])
+                            .let { if (it > 32767) it - 65536 else it }
+                        
+                        // Heuristic: if ID is C4, it's likely RPM
+                        if (id == 0xC4) MotorStatus(rpm = value, rawBytes = raw)
+                        else if (id == 0x10 || id == 0x60) MotorStatus(powerW = value, rawBytes = raw)
+                        else null
+                    } else null
+                }
+                0xB1 -> { // Likely Temperature
+                    if (payload.size >= 3) {
+                         MotorStatus(tempC = payload[2].toInt(), rawBytes = raw)
+                    } else null
+                }
+                else -> null
+            }
+        }
 
-        fun s16(hi: Byte, lo: Byte): Int =
-            ((hi.toInt() and 0xFF) shl 8) or (lo.toInt() and 0xFF)
-
-        return MotorStatus(
-            rpm       = s16(payload[2], payload[3]).let { if (it > 32767) it - 65536 else it },
-            powerW    = s16(payload[4], payload[5]).let { if (it > 32767) it - 65536 else it },
-            tempC     = payload[6].toInt(),
-            errorCode = payload[7].toInt() and 0xFF,
-            rawBytes  = raw
-        )
+        return null
     }
 
-    fun errorDescription(code: Int): String = when (code) {
+    fun errorDescription(code: Int?): String = when (code) {
+        null -> "Waiting for data…"
         0x00 -> "OK"
         0x01 -> "Overcurrent"
         0x02 -> "Overvoltage"

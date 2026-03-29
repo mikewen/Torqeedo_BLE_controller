@@ -39,12 +39,16 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
     private var ae10Char: BluetoothGattCharacteristic? = null
     private var ae02Char: BluetoothGattCharacteristic? = null
 
+    private var isLoggingEnabled = true
+    private var isRawDataEnabled = true
+
     // ── Logging to File ─────────────────────────────────────────────────────
     private val logFile: File by lazy {
         File(context.getExternalFilesDir(null), "torqeedo_ble_log.txt")
     }
 
     private fun logToFile(direction: String, data: ByteArray) {
+        if (!isLoggingEnabled) return
         try {
             val timestamp = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
             val hex = data.joinToString(" ") { "%02X".format(it) }
@@ -56,6 +60,14 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         } catch (e: Exception) {
             Log.e(TAG, "File log failed", e)
         }
+    }
+
+    fun setLoggingEnabled(enabled: Boolean) {
+        isLoggingEnabled = enabled
+    }
+
+    fun setRawDataEnabled(enabled: Boolean) {
+        isRawDataEnabled = enabled
     }
 
     // ── Public state ────────────────────────────────────────────────────────
@@ -108,39 +120,48 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         }
     }
 
+    /**
+     * Improved framing logic based on user logs.
+     * Some messages end with 0xAD (FOOTER), others seem to be separated by 0xAC (HEADER)
+     * or are short bursts.
+     */
     private fun processBuffer() {
-        while (rxBuffer.size >= 5) { // Minimum possible frame: HEADER, ADDR, ID, CRC, FOOTER
-            // Find start of frame (0xAC)
+        while (rxBuffer.isNotEmpty()) {
             val startIdx = rxBuffer.indexOf(TorqeedoProtocol.HEADER)
             if (startIdx == -1) {
                 rxBuffer.clear()
                 return
             }
             if (startIdx > 0) {
-                // Remove garbage before the header
                 repeat(startIdx) { rxBuffer.removeAt(0) }
             }
 
-            // Find end of frame (0xAD)
-            // Note: Byte stuffing means we must be careful, but FOOTER is never stuffed.
-            val endIdx = rxBuffer.indexOf(TorqeedoProtocol.FOOTER)
-            if (endIdx == -1) {
-                // Frame start found but no footer yet. 
-                // If the buffer is getting too large, drop the header to look for next one.
+            // Now rxBuffer[0] is HEADER (0xAC)
+            // Look for the NEXT header or a footer
+            var frameEndIdx = -1
+            for (i in 1 until rxBuffer.size) {
+                if (rxBuffer[i] == TorqeedoProtocol.HEADER || rxBuffer[i] == TorqeedoProtocol.FOOTER) {
+                    frameEndIdx = i
+                    break
+                }
+            }
+
+            if (frameEndIdx == -1) {
+                // No delimiter found yet. If buffer is too big, discard.
                 if (rxBuffer.size > 256) rxBuffer.removeAt(0)
                 return
             }
 
-            // Extract frame
-            val frameLength = endIdx + 1
-            val frame = rxBuffer.take(frameLength).toByteArray()
+            // Include the footer if that's what we found
+            val frameLength = if (rxBuffer[frameEndIdx] == TorqeedoProtocol.FOOTER) frameEndIdx + 1 else frameEndIdx
             
-            // Consume from buffer
+            val frame = rxBuffer.take(frameLength).toByteArray()
             repeat(frameLength) { rxBuffer.removeAt(0) }
 
-            // Log and broadcast the extracted frame
-            logToFile("FRAME", frame)
-            _rawStatusFlow.tryEmit(frame)
+            if (isRawDataEnabled) {
+                logToFile("FRAME", frame)
+                _rawStatusFlow.tryEmit(frame)
+            }
             
             TorqeedoProtocol.parseStatus(frame)?.let { status ->
                 _statusFlow.tryEmit(status)
@@ -152,8 +173,10 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         _connectionState.value = ConnectionState.CONNECTING
         try {
             val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
-            FileOutputStream(logFile, true).use { 
-                it.write("\n--- Session Start: $timestamp (${device.address}) ---\n".toByteArray()) 
+            if (isLoggingEnabled) {
+                FileOutputStream(logFile, true).use { 
+                    it.write("\n--- Session Start: $timestamp (${device.address}) ---\n".toByteArray()) 
+                }
             }
             rxBuffer.clear()
             connect(device).retry(3, 300).timeout(10_000).suspend()
