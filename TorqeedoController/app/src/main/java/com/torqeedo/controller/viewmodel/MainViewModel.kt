@@ -109,11 +109,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _gpsFix.value = true
             
             // Speed in m/s to knots (1 m/s ≈ 1.94384 knots)
-            _gpsSpeedKnots.value = location.speed * 1.94384f
+            val speedKnots = location.speed * 1.94384f
+            _gpsSpeedKnots.value = speedKnots
             
-            if (location.hasBearing()) {
-                _gpsCourse.value = location.bearing.toInt()
+            val course = if (location.hasBearing()) {
+                location.bearing.toInt()
+            } else {
+                null
             }
+            _gpsCourse.value = course
+
+            // Update BLE manager with GPS info for logging
+            bleManager.updateGpsInfo(
+                location.latitude,
+                location.longitude,
+                speedKnots,
+                course
+            )
         }
 
         override fun onLocationAvailability(availability: LocationAvailability) {
@@ -131,6 +143,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stopGpsUpdates() {
         fusedLocationClient.removeLocationUpdates(locationCallback)
+        bleManager.updateGpsInfo(null, null, null, null)
         _gpsFix.value = false
     }
 

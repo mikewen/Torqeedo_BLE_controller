@@ -43,17 +43,42 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
     private var isLoggingEnabled = true
     private var isRawDataEnabled = true
 
+    // ── GPS for logging ─────────────────────────────────────────────────────
+    private var lastLat: Double? = null
+    private var lastLon: Double? = null
+    private var lastSpeed: Float? = null
+    private var lastCog: Int? = null
+
+    fun updateGpsInfo(lat: Double?, lon: Double?, speedKnots: Float?, cog: Int?) {
+        lastLat = lat
+        lastLon = lon
+        lastSpeed = speedKnots
+        lastCog = cog
+    }
+
     // ── Logging to File ─────────────────────────────────────────────────────
     private val logFile: File by lazy {
         File(context.getExternalFilesDir(null), "torqeedo_ble_log.txt")
     }
 
+    private fun getLogPrefix(): String {
+        val timestamp = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
+        val gps = if (lastLat != null && lastLon != null) {
+            " [%.6f, %.6f, %.1f kn, %s°]".format(
+                Locale.US, lastLat, lastLon, lastSpeed ?: 0f, lastCog?.toString() ?: "-"
+            )
+        } else {
+            ""
+        }
+        return "[$timestamp]$gps"
+    }
+
     private fun logToFile(direction: String, data: ByteArray) {
         if (!isLoggingEnabled) return
         try {
-            val timestamp = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
+            val prefix = getLogPrefix()
             val hex = data.joinToString(" ") { "%02X".format(it) }
-            val line = "[$timestamp] $direction: $hex\n"
+            val line = "$prefix $direction: $hex\n"
             
             FileOutputStream(logFile, true).use { output ->
                 output.write(line.toByteArray())
@@ -66,8 +91,8 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
     private fun logTextToFile(direction: String, text: String) {
         if (!isLoggingEnabled) return
         try {
-            val timestamp = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
-            val line = "[$timestamp] $direction: $text\n"
+            val prefix = getLogPrefix()
+            val line = "$prefix $direction: $text\n"
             FileOutputStream(logFile, true).use { it.write(line.toByteArray()) }
         } catch (e: Exception) {
             Log.e(TAG, "File log text failed", e)
