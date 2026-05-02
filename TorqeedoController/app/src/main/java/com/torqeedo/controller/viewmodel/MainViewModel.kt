@@ -30,6 +30,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val DEFAULT_AUTO_DELAY = 200L      // 5 steps per second (10% / sec)
         private const val DEFAULT_THROTTLE_DELAY = 200L  // 5 Hz throttle loop
         private const val STATUS_QUERY_DELAY = 500L      // 2 Hz status query
+        private const val SENSOR_READ_DELAY = 200L      // 5 Hz current sensor read
     }
 
     // Configurable parameters as StateFlows
@@ -64,6 +65,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val motorStatus:     StateFlow<TorqeedoProtocol.MotorStatus?>      =
         bleManager.statusFlow.stateIn(viewModelScope, SharingStarted.Lazily, null)
     
+    val sensorCurrent: StateFlow<Float> = bleManager.sensorCurrent
+    
+    // Estimated Power at 47V
+    val estimatedPowerW: StateFlow<Float> = sensorCurrent.map { it * 47.0f }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
+
     val rawStatus: StateFlow<ByteArray?> = 
         bleManager.rawStatusFlow.stateIn(viewModelScope, SharingStarted.Lazily, null)
 
@@ -92,6 +99,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var throttleJob: Job? = null
     private var statusQueryJob: Job? = null
+    private var sensorReadJob: Job? = null
     private var autoAdjustmentJob: Job? = null
 
     // ── GPS ───────────────────────────────────────────────────────────────
@@ -222,11 +230,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun startLoops() {
         startThrottleLoop()
         startStatusQueryLoop()
+        startSensorReadLoop()
     }
 
     private fun stopLoops() {
         stopThrottleLoop()
         stopStatusQueryLoop()
+        stopSensorReadLoop()
     }
 
     private fun startThrottleLoop() {
@@ -262,6 +272,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun stopStatusQueryLoop() {
         statusQueryJob?.cancel()
         statusQueryJob = null
+    }
+
+    private fun startSensorReadLoop() {
+        sensorReadJob?.cancel()
+        sensorReadJob = viewModelScope.launch {
+            while (true) {
+                if (connectionState.value == TorqeedoBleManager.ConnectionState.CONNECTED) {
+                    bleManager.readCurrentSensor()
+                }
+                delay(SENSOR_READ_DELAY)
+            }
+        }
+    }
+
+    private fun stopSensorReadLoop() {
+        sensorReadJob?.cancel()
+        sensorReadJob = null
     }
 
     override fun onCleared() {

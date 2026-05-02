@@ -163,9 +163,9 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent">
 
-        <!-- GPS STATUS card -->
+        <!-- TELEMETRY card (GPS + SENSORS) -->
         <androidx.cardview.widget.CardView
-            android:id="@+id/gpsCard"
+            android:id="@+id/telemetryCard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="12dp"
@@ -182,7 +182,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="GPS DATA"
+                    android:text="TELEMETRY"
                     android:textColor="@color/text_secondary"
                     android:textSize="11sp"
                     android:letterSpacing="0.12"
@@ -200,9 +200,9 @@
                         <TextView android:id="@+id/tvGpsSpeed"
                             android:layout_width="wrap_content" android:layout_height="wrap_content"
                             android:text="0.0" android:textColor="@color/accent_primary"
-                            android:textSize="36sp" android:fontFamily="sans-serif-medium" />
+                            android:textSize="28sp" android:fontFamily="sans-serif-medium" />
                         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="KNOTS" android:textColor="@color/text_secondary" android:textSize="13sp" />
+                            android:text="KNOTS" android:textColor="@color/text_secondary" android:textSize="11sp" />
                     </LinearLayout>
 
                     <View android:layout_width="1dp" android:layout_height="match_parent"
@@ -213,9 +213,35 @@
                         <TextView android:id="@+id/tvGpsCourse"
                             android:layout_width="wrap_content" android:layout_height="wrap_content"
                             android:text="—" android:textColor="@color/accent_primary"
-                            android:textSize="36sp" android:fontFamily="sans-serif-medium" />
+                            android:textSize="28sp" android:fontFamily="sans-serif-medium" />
                         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="COURSE" android:textColor="@color/text_secondary" android:textSize="13sp" />
+                            android:text="COURSE" android:textColor="@color/text_secondary" android:textSize="11sp" />
+                    </LinearLayout>
+
+                    <View android:layout_width="1dp" android:layout_height="match_parent"
+                        android:background="@color/border_subtle" android:layout_marginVertical="4dp"/>
+
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:orientation="vertical" android:gravity="center">
+                        <TextView android:id="@+id/tvCurrent"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="0.0" android:textColor="@color/accent_primary"
+                            android:textSize="28sp" android:fontFamily="sans-serif-medium" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="AMPS" android:textColor="@color/text_secondary" android:textSize="11sp" />
+                    </LinearLayout>
+
+                    <View android:layout_width="1dp" android:layout_height="match_parent"
+                        android:background="@color/border_subtle" android:layout_marginVertical="4dp"/>
+
+                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:orientation="vertical" android:gravity="center">
+                        <TextView android:id="@+id/tvPower"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="0" android:textColor="@color/accent_primary"
+                            android:textSize="28sp" android:fontFamily="sans-serif-medium" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                            android:text="WATTS (47V)" android:textColor="@color/text_secondary" android:textSize="10sp" />
                     </LinearLayout>
                 </LinearLayout>
 
@@ -254,8 +280,7 @@
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:layout_weight="2"
-                android:orientation="vertical"
+                android:layout_weight="2" android:orientation="vertical"
                 android:gravity="center">
 
                 <Button

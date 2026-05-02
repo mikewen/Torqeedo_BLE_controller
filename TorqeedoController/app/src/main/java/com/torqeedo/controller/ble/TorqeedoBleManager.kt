@@ -20,6 +20,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.abs
 
 /**
  * Nordic BleManager for the AC6328 BLE-UART bridge.
@@ -62,6 +63,17 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         }
     }
 
+    private fun logTextToFile(direction: String, text: String) {
+        if (!isLoggingEnabled) return
+        try {
+            val timestamp = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
+            val line = "[$timestamp] $direction: $text\n"
+            FileOutputStream(logFile, true).use { it.write(line.toByteArray()) }
+        } catch (e: Exception) {
+            Log.e(TAG, "File log text failed", e)
+        }
+    }
+
     fun setLoggingEnabled(enabled: Boolean) {
         isLoggingEnabled = enabled
     }
@@ -76,6 +88,9 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
 
     private val _statusFlow = MutableSharedFlow<TorqeedoProtocol.MotorStatus>(replay = 1)
     val statusFlow: SharedFlow<TorqeedoProtocol.MotorStatus> = _statusFlow.asSharedFlow()
+
+    private val _sensorCurrent = MutableStateFlow(0f)
+    val sensorCurrent: StateFlow<Float> = _sensorCurrent.asStateFlow()
 
     private val _rawStatusFlow = MutableSharedFlow<ByteArray>(replay = 1)
     val rawStatusFlow: SharedFlow<ByteArray> = _rawStatusFlow.asSharedFlow()
@@ -204,6 +219,31 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         val frame = TorqeedoProtocol.buildStatusQuery()
         logToFile("SEND_STAT", frame)
         writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue()
+    }
+
+    fun readCurrentSensor() {
+        val char = ae10Char ?: return
+        readCharacteristic(char).with { _, data ->
+            data.value?.let { bytes ->
+                val s = String(bytes)
+                if (s.startsWith("V")) {
+                    try {
+                        val mvStr = s.substring(1).filter { it.isDigit() }
+                        if (mvStr.isNotEmpty()) {
+                            val mv = mvStr.toInt()
+                            // Sensor: CC6903SO-30A
+                            // 3.3V supply: 1.65V (1650mV) = 0A. 
+                            // 30A full scale corresponds to 0V or 3.3V (approx 55mV/A)
+                            val amps = abs(mv - 1650) / 55.0f
+                            _sensorCurrent.value = amps
+                            logTextToFile("RECV_CURR", "Raw: $s, Amps: $amps")
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to parse current sensor string: $s", e)
+                    }
+                }
+            }
+        }.enqueue()
     }
 
     enum class ConnectionState { DISCONNECTED, CONNECTING, CONNECTED }

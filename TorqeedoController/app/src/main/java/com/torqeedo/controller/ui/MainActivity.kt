@@ -204,7 +204,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                // GPS Data Observation
+                // Telemetry Data Observation
                 launch {
                     vm.gpsSpeedKnots.collectLatest { knots ->
                         binding.tvGpsSpeed.text = "%.1f".format(knots)
@@ -214,6 +214,18 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     vm.gpsCourse.collectLatest { course ->
                         binding.tvGpsCourse.text = course?.let { "$it°" } ?: "—"
+                    }
+                }
+
+                launch {
+                    vm.sensorCurrent.collectLatest { current ->
+                        binding.tvCurrent.text = "%.1f".format(current)
+                    }
+                }
+
+                launch {
+                    vm.estimatedPowerW.collectLatest { power ->
+                        binding.tvPower.text = "%.0f".format(power)
                     }
                 }
 
