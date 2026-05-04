@@ -64,16 +64,33 @@ class BleScanner(private val adapter: BluetoothAdapter) {
             .build()
 
         val filters = if (scanAllNames) {
-            // No filter or empty list to see everything
             emptyList<ScanFilter>()
         } else {
             listOf(
-                ScanFilter.Builder()
-                    .setDeviceName("AC6328_UART")
-                    .build()
+                ScanFilter.Builder().setDeviceName("AC6328_UART").build(),
+                ScanFilter.Builder().setDeviceName("LOOKBON").build()
             )
         }
         
+        internalStartScan(filters, settings)
+    }
+
+    fun startRemoteScan() {
+        if (_isScanning.value) return
+        _devices.value = emptyList()
+
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .build()
+
+        val filters = listOf(
+            ScanFilter.Builder().setDeviceName("LOOKBON").build()
+        )
+        
+        internalStartScan(filters, settings)
+    }
+
+    private fun internalStartScan(filters: List<ScanFilter>, settings: ScanSettings) {
         try {
             scanner?.startScan(filters, settings, scanCallback)
             _isScanning.value = true

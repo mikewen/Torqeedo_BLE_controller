@@ -6,11 +6,13 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.os.Looper
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.location.*
 import com.torqeedo.controller.ble.BleScanner
 import com.torqeedo.controller.ble.DiscoveredDevice
+import com.torqeedo.controller.ble.LookbonRemote
 import com.torqeedo.controller.ble.TorqeedoBleManager
 import com.torqeedo.controller.protocol.TorqeedoProtocol
 import kotlinx.coroutines.Job
@@ -23,6 +25,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     enum class Direction { FORWARD, REVERSE }
 
     companion object {
+        private const val TAG = "MainViewModel"
         const val SPEED_MAX = 1000
         const val SPEED_MIN = 0
         
@@ -57,9 +60,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         (application.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
 
     val bleManager = TorqeedoBleManager(application)
+    val remote     = LookbonRemote(application)
     val scanner    = BleScanner(bluetoothAdapter)
 
     val connectionState: StateFlow<TorqeedoBleManager.ConnectionState> = bleManager.connectionState
+    
+    private val _remoteConnected = MutableStateFlow(false)
+    val remoteConnected: StateFlow<Boolean> = _remoteConnected.asStateFlow()
+
     val scanResults:     StateFlow<List<DiscoveredDevice>>             = scanner.devices
     val isScanning:      StateFlow<Boolean>                            = scanner.isScanning
     val motorStatus:     StateFlow<TorqeedoProtocol.MotorStatus?>      =
@@ -101,6 +109,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var statusQueryJob: Job? = null
     private var sensorReadJob: Job? = null
     private var autoAdjustmentJob: Job? = null
+
+    init {
+        setupRemote()
+    }
+
+    private fun setupRemote() {
+        remote.onConnected = { _remoteConnected.value = true }
+        remote.onDisconnected = { _remoteConnected.value = false }
+        remote.onCommand = { cmd ->
+            when (cmd) {
+                LookbonRemote.Command.SPEED_UP -> increaseSpeed()
+                LookbonRemote.Command.SPEED_DOWN -> decreaseSpeed()
+                LookbonRemote.Command.SPEED_UP_FAST -> {
+                    repeat(5) { increaseSpeed() }
+                }
+                LookbonRemote.Command.SPEED_DOWN_FAST -> {
+                    repeat(5) { decreaseSpeed() }
+                }
+                LookbonRemote.Command.STOP -> stopMotor()
+                LookbonRemote.Command.TOGGLE_DIRECTION -> {
+                    setDirection(if (direction.value == Direction.FORWARD) Direction.REVERSE else Direction.FORWARD)
+                }
+            }
+        }
+    }
 
     // ── GPS ───────────────────────────────────────────────────────────────
     private val locationCallback = object : LocationCallback() {
@@ -153,6 +186,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startScan() = scanner.startScan(_scanAllNames.value)
+    fun startRemoteScan() = scanner.startRemoteScan()
     fun stopScan()  = scanner.stopScan()
 
     // ── Debug ─────────────────────────────────────────────────────────────
@@ -171,10 +205,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         scanner.stopScan()
         viewModelScope.launch {
             try {
-                bleManager.connectToDevice(device.device)
-                startLoops()
-                startGpsUpdates()
-            } catch (_: Exception) {}
+                if (device.name.contains("LOOKBON", ignoreCase = true)) {
+                    remote.connectToDevice(device.device)
+                } else {
+                    bleManager.connectToDevice(device.device)
+                    startLoops()
+                    startGpsUpdates()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to connect to ${device.name}", e)
+            }
         }
     }
 
@@ -182,6 +222,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         stopLoops()
         stopGpsUpdates()
         bleManager.disconnectDevice()
+    }
+    
+    fun disconnectRemote() {
+        remote.disconnect().enqueue()
     }
 
     // ── Configuration ─────────────────────────────────────────────────────
@@ -309,5 +353,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         stopLoops()
         stopGpsUpdates()
         bleManager.disconnectDevice()
+        remote.disconnect().enqueue()
     }
 }

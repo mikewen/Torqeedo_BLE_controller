@@ -138,6 +138,10 @@ class MainActivity : AppCompatActivity() {
         binding.btnScan.setOnClickListener {
             if (vm.isScanning.value) vm.stopScan() else vm.startScan()
         }
+
+        binding.btnScanRemote.setOnClickListener {
+            if (vm.isScanning.value) vm.stopScan() else vm.startRemoteScan()
+        }
     }
 
     private fun observeState() {
@@ -147,25 +151,33 @@ class MainActivity : AppCompatActivity() {
                     vm.connectionState.collectLatest { state ->
                         when (state) {
                             TorqeedoBleManager.ConnectionState.DISCONNECTED -> {
-                                binding.tvConnectionStatus.text = "Disconnected"
+                                binding.tvConnectionStatus.text = "Motor: Off"
                                 binding.tvConnectionStatus.setTextColor(
                                     ContextCompat.getColor(this@MainActivity, R.color.status_disconnected))
                                 binding.controlPanel.visibility = View.GONE
                                 binding.scanPanel.visibility    = View.VISIBLE
                             }
                             TorqeedoBleManager.ConnectionState.CONNECTING -> {
-                                binding.tvConnectionStatus.text = "Connecting…"
+                                binding.tvConnectionStatus.text = "Motor: …"
                                 binding.tvConnectionStatus.setTextColor(
                                     ContextCompat.getColor(this@MainActivity, R.color.status_connecting))
                             }
                             TorqeedoBleManager.ConnectionState.CONNECTED -> {
-                                binding.tvConnectionStatus.text = "Connected"
+                                binding.tvConnectionStatus.text = "Motor: On"
                                 binding.tvConnectionStatus.setTextColor(
                                     ContextCompat.getColor(this@MainActivity, R.color.status_connected))
                                 binding.scanPanel.visibility    = View.GONE
                                 binding.controlPanel.visibility = View.VISIBLE
                             }
                         }
+                    }
+                }
+
+                launch {
+                    vm.remoteConnected.collectLatest { connected ->
+                        binding.tvRemoteStatus.text = if (connected) "Remote: On" else "Remote: Off"
+                        binding.tvRemoteStatus.setTextColor(ContextCompat.getColor(this@MainActivity,
+                            if (connected) R.color.status_connected else R.color.text_secondary))
                     }
                 }
 
@@ -179,7 +191,8 @@ class MainActivity : AppCompatActivity() {
 
                 launch {
                     vm.isScanning.collectLatest { scanning ->
-                        binding.btnScan.text = if (scanning) "Stop scan" else "Scan for devices"
+                        binding.btnScan.text = if (scanning) "Stop Scan" else "Scan for Motor"
+                        binding.btnScanRemote.text = if (scanning) "Stop Scan" else "Scan for Remote"
                         binding.scanProgress.visibility = if (scanning) View.VISIBLE else View.GONE
                         binding.switchScanAll.isEnabled = !scanning
                     }

@@ -30,10 +30,19 @@
             android:fontFamily="sans-serif-medium" />
 
         <TextView
+            android:id="@+id/tvRemoteStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Remote: Off"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp"
+            android:layout_marginEnd="12dp" />
+
+        <TextView
             android:id="@+id/tvConnectionStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Disconnected"
+            android:text="Motor: Off"
             android:textColor="@color/status_disconnected"
             android:textSize="13sp" />
     </LinearLayout>
@@ -99,8 +108,16 @@
             style="@style/Widget.TorqeedoController.Button.Primary"
             android:layout_width="match_parent"
             android:layout_height="52dp"
-            android:text="Scan for devices"
+            android:text="Scan for Motor"
             android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btnScanRemote"
+            style="@style/Widget.TorqeedoController.Button.Secondary"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:text="Scan for Remote"
+            android:layout_marginBottom="16dp" />
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -135,7 +152,7 @@
             android:id="@+id/tvNoDevices"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="No devices found. Make sure AC6328 is powered and advertising."
+            android:text="No devices found."
             android:textColor="@color/text_secondary"
             android:textSize="14sp"
             android:gravity="center"
@@ -294,12 +311,9 @@
 
                 <TextView
                     android:id="@+id/tvSpeed"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="0%"
-                    android:textColor="@color/text_primary"
-                    android:textSize="36sp"
-                    android:fontFamily="sans-serif-medium"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="0%" android:textColor="@color/text_primary"
+                    android:textSize="36sp" android:fontFamily="sans-serif-medium"
                     android:layout_marginVertical="24dp" />
 
                 <Button
