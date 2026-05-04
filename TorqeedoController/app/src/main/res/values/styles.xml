@@ -11,11 +11,12 @@
         <item name="android:stateListAnimator">@null</item>
     </style>
 
-    <!-- Secondary / ghost button -->
+    <!-- Secondary / ghost button - Improved visibility -->
     <style name="Widget.TorqeedoController.Button.Secondary" parent="Widget.Material3.Button.OutlinedButton">
-        <item name="strokeColor">@color/border_subtle</item>
-        <item name="android:textColor">@color/text_secondary</item>
-        <item name="android:textSize">14sp</item>
+        <item name="strokeColor">@color/accent_primary</item>
+        <item name="strokeWidth">1dp</item>
+        <item name="android:textColor">@color/accent_primary</item>
+        <item name="android:textSize">18dp</item>
         <item name="cornerRadius">10dp</item>
         <item name="android:stateListAnimator">@null</item>
     </style>
@@ -63,4 +64,3 @@
     </style>
 
 </resources>
-<!-- Appended by update -->

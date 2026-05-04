@@ -8,8 +8,12 @@ This project implements the **TQ Bus protocol** (proprietary RS485-based protoco
 *   **Wireless Throttle**: Control speed and direction over Bluetooth.
 *   **Real-time Telemetry**: Monitor Motor RPM, Temperature (°C), and **Battery Current (Amps)**.
 *   **Power Estimation**: Calculate estimated power consumption in Watts based on current sensor data and an assumed 47V bus.
+*   **LOOKBON Remote Support**: Full integration with LOOKBON BLE remotes for tactile throttle and direction control.
+*   **Auto-Reconnect**: Automatically restores connection to the BLE Remote when powered on (persists across app restarts).
+*   **Voice Feedback**: Text-to-speech prompts for connection status ("Motor connected", "Remote disconnected") and throttle changes.
+*   **Persistent Settings**: "Raw Data", "Logging", and "Voice Prompts" preferences are saved automatically.
 *   **Safety First**: Automatic motor stop on BLE disconnection (via 500ms hardware watchdog).
-*   **Modern UI**: High-contrast, dark nautical theme optimized for outdoor visibility.
+*   **Modern UI**: High-contrast, dark nautical theme with improved button visibility for outdoor use.
 *   **Precise Control**: Incremental 2% speed steps with smooth auto-acceleration on long-press.
 *   **GPS Integration**: Monitor speed over ground (SOG) in knots and course over ground (COG).
 
@@ -31,8 +35,6 @@ readCurrent()     ◀─BLE ae10── CC6903 Sensor Val
 *   **RS485**: Half-duplex.
 *   **BLE Service**: `0xAE30` (Service), `0xAE10` (Write/Read), `0xAE02` (Notify).
 *   **Current Sensor**: CC6903SO-30A (±30A Range).
-    *   The firmware returns a millivolt string via `0xAE10` (e.g., `'V1650'` = 1650mV = 0A).
-    *   The app polls this sensor at **5 Hz**.
 
 ## User Interface & Controls
 
@@ -44,7 +46,12 @@ readCurrent()     ◀─BLE ae10── CC6903 Sensor Val
 | **STOP Button** | Immediately resets speed magnitude to 0%. |
 | **Telemetry Card** | Displays real-time RPM, Course, SOG (Knots), **Amps**, and **Estimated Watts (47V)**. |
 
-The application maintains a **10 Hz (100ms) throttle loop**. If the BLE connection drops, the motor's internal safety watchdog will trigger an emergency stop within ~500ms.
+### Remote Control Mapping (LOOKBON)
+The app maps the following buttons on the LOOKBON BLE remote:
+*   **Joystick Up/Down**: Increase/Decrease speed.
+*   **Joystick Left/Right**: Toggle Direction (Forward/Reverse).
+*   **Center Button (@)**: Emergency STOP.
+*   **Trigger (R) + Thumb Up/Down**: Fast speed adjustment (10% steps).
 
 ## Development
 
@@ -59,16 +66,10 @@ The application maintains a **10 Hz (100ms) throttle loop**. If the BLE connecti
 ./gradlew installDebug
 ```
 
-### File Structure
-*   `protocol/TorqeedoProtocol.kt`: CRC-8/Maxim implementation and TQ Bus frame builders.
-*   `ble/TorqeedoBleManager.kt`: Nordic BLE library implementation for GATT communication and current sensor parsing.
-*   `viewmodel/MainViewModel.kt`: Throttle loop, telemetry aggregation, and power calculation.
-*   `ui/MainActivity.kt`: Event handling for the nautical control interface.
-
 ## Dependencies
 *   [Nordic BLE Library](https://github.com/NordicSemiconductor/Android-BLE-Library): For robust, reactive Bluetooth communication.
 *   [Google Play Services Location](https://developers.google.com/android/guides/setup): For high-accuracy GPS speed and course tracking.
 *   [Material Components](https://github.com/material-components/material-components-android): Modern UI components.
 
 ## Keywords
-Torqeedo Control, Electric Outboard, Travel 1003, BLE Throttle, Boat Motor App, RS485 BLE, AC6328, ESP32 Boat Control, TQ Bus Protocol, Current Sensor CC6903, Power Monitoring.
+Torqeedo Control, Electric Outboard, Travel 1003, BLE Throttle, Boat Motor App, RS485 BLE, AC6328, ESP32 Boat Control, TQ Bus Protocol, Current Sensor CC6903, Power Monitoring, BLE Remote Control.

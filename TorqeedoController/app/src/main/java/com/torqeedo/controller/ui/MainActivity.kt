@@ -78,6 +78,9 @@ class MainActivity : AppCompatActivity() {
         binding.switchLogging.setOnCheckedChangeListener { _, isChecked ->
             vm.setEnableLogging(isChecked)
         }
+        binding.switchVoice.setOnCheckedChangeListener { _, isChecked ->
+            vm.setEnableVoicePrompts(isChecked)
+        }
 
         // Scan Settings
         binding.switchScanAll.setOnCheckedChangeListener { _, isChecked ->
@@ -214,6 +217,12 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     vm.enableLogging.collectLatest { enabled ->
                         binding.switchLogging.isChecked = enabled
+                    }
+                }
+
+                launch {
+                    vm.enableVoicePrompts.collectLatest { enabled ->
+                        binding.switchVoice.isChecked = enabled
                     }
                 }
 

@@ -5,7 +5,9 @@ import android.app.Application
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Looper
+import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -19,13 +21,20 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.Locale
 
-class MainViewModel(application: Application) : AndroidViewModel(application) {
+class MainViewModel(application: Application) : AndroidViewModel(application), TextToSpeech.OnInitListener {
 
     enum class Direction { FORWARD, REVERSE }
 
     companion object {
         private const val TAG = "MainViewModel"
+        private const val PREFS_NAME = "torqeedo_prefs"
+        private const val KEY_SHOW_RAW = "show_raw"
+        private const val KEY_LOGGING = "logging"
+        private const val KEY_VOICE = "voice"
+        private const val KEY_REMOTE_MAC = "remote_mac"
+
         const val SPEED_MAX = 1000
         const val SPEED_MIN = 0
         
@@ -35,6 +44,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val STATUS_QUERY_DELAY = 500L      // 2 Hz status query
         private const val SENSOR_READ_DELAY = 200L      // 5 Hz current sensor read
     }
+
+    private val prefs: SharedPreferences = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     // Configurable parameters as StateFlows
     private val _speedStep = MutableStateFlow(DEFAULT_SPEED_STEP)
@@ -49,12 +60,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _scanAllNames = MutableStateFlow(false)
     val scanAllNames: StateFlow<Boolean> = _scanAllNames.asStateFlow()
 
-    // Debug settings
-    private val _showRawData = MutableStateFlow(true)
+    // Debug settings - persisted
+    private val _showRawData = MutableStateFlow(prefs.getBoolean(KEY_SHOW_RAW, true))
     val showRawData: StateFlow<Boolean> = _showRawData.asStateFlow()
 
-    private val _enableLogging = MutableStateFlow(true)
+    private val _enableLogging = MutableStateFlow(prefs.getBoolean(KEY_LOGGING, true))
     val enableLogging: StateFlow<Boolean> = _enableLogging.asStateFlow()
+
+    private val _enableVoicePrompts = MutableStateFlow(prefs.getBoolean(KEY_VOICE, true))
+    val enableVoicePrompts: StateFlow<Boolean> = _enableVoicePrompts.asStateFlow()
 
     private val bluetoothAdapter: BluetoothAdapter =
         (application.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
@@ -110,26 +124,92 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var sensorReadJob: Job? = null
     private var autoAdjustmentJob: Job? = null
 
+    private var tts: TextToSpeech? = TextToSpeech(application, this)
+
     init {
         setupRemote()
+        setupConnectionVoice()
+        
+        // Initial setup for managers from persisted values
+        bleManager.setRawDataEnabled(_showRawData.value)
+        bleManager.setLoggingEnabled(_enableLogging.value)
+
+        // Auto-reconnect to remote if we have a saved MAC
+        prefs.getString(KEY_REMOTE_MAC, null)?.let { mac ->
+            try {
+                val device = bluetoothAdapter.getRemoteDevice(mac)
+                remote.connectToDevice(device, autoReconnect = true)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to auto-reconnect to remote: $mac", e)
+            }
+        }
+    }
+
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            tts?.language = Locale.US
+        } else {
+            Log.e(TAG, "TTS Initialization failed")
+        }
+    }
+
+    private fun speak(text: String) {
+        if (_enableVoicePrompts.value) {
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "voice_prompt")
+        }
     }
 
     private fun setupRemote() {
-        remote.onConnected = { _remoteConnected.value = true }
-        remote.onDisconnected = { _remoteConnected.value = false }
+        remote.onConnected = { 
+            _remoteConnected.value = true
+            speak("Remote connected")
+            // Save MAC address for auto-reconnect
+            remote.bluetoothDevice?.address?.let { mac ->
+                prefs.edit().putString(KEY_REMOTE_MAC, mac).apply()
+            }
+        }
+        remote.onDisconnected = { 
+            _remoteConnected.value = false
+            speak("Remote disconnected")
+        }
         remote.onCommand = { cmd ->
             when (cmd) {
-                LookbonRemote.Command.SPEED_UP -> increaseSpeed()
-                LookbonRemote.Command.SPEED_DOWN -> decreaseSpeed()
+                LookbonRemote.Command.SPEED_UP -> {
+                    increaseSpeed()
+                    speak("${speedMagnitude.value / 10} percent")
+                }
+                LookbonRemote.Command.SPEED_DOWN -> {
+                    decreaseSpeed()
+                    speak("${speedMagnitude.value / 10} percent")
+                }
                 LookbonRemote.Command.SPEED_UP_FAST -> {
                     repeat(5) { increaseSpeed() }
+                    speak("${speedMagnitude.value / 10} percent")
                 }
                 LookbonRemote.Command.SPEED_DOWN_FAST -> {
                     repeat(5) { decreaseSpeed() }
+                    speak("${speedMagnitude.value / 10} percent")
                 }
-                LookbonRemote.Command.STOP -> stopMotor()
+                LookbonRemote.Command.STOP -> {
+                    stopMotor()
+                    speak("Stop")
+                }
                 LookbonRemote.Command.TOGGLE_DIRECTION -> {
-                    setDirection(if (direction.value == Direction.FORWARD) Direction.REVERSE else Direction.FORWARD)
+                    val newDir = if (direction.value == Direction.FORWARD) Direction.REVERSE else Direction.FORWARD
+                    setDirection(newDir)
+                    speak(newDir.name.lowercase())
+                }
+            }
+        }
+    }
+
+    private fun setupConnectionVoice() {
+        viewModelScope.launch {
+            connectionState.drop(1).collect { state ->
+                when (state) {
+                    TorqeedoBleManager.ConnectionState.CONNECTED -> speak("Motor connected")
+                    TorqeedoBleManager.ConnectionState.DISCONNECTED -> speak("Motor disconnected")
+                    else -> {}
                 }
             }
         }
@@ -193,11 +273,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setShowRawData(show: Boolean) {
         _showRawData.value = show
         bleManager.setRawDataEnabled(show)
+        prefs.edit().putBoolean(KEY_SHOW_RAW, show).apply()
     }
 
     fun setEnableLogging(enabled: Boolean) {
         _enableLogging.value = enabled
         bleManager.setLoggingEnabled(enabled)
+        prefs.edit().putBoolean(KEY_LOGGING, enabled).apply()
+    }
+
+    fun setEnableVoicePrompts(enabled: Boolean) {
+        _enableVoicePrompts.value = enabled
+        prefs.edit().putBoolean(KEY_VOICE, enabled).apply()
     }
 
     // ── Connect / disconnect ──────────────────────────────────────────────
@@ -206,7 +293,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 if (device.name.contains("LOOKBON", ignoreCase = true)) {
-                    remote.connectToDevice(device.device)
+                    remote.connectToDevice(device.device, autoReconnect = true)
                 } else {
                     bleManager.connectToDevice(device.device)
                     startLoops()
@@ -225,6 +312,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     fun disconnectRemote() {
+        prefs.edit().remove(KEY_REMOTE_MAC).apply() // Forget remote if explicitly disconnected
         remote.disconnect().enqueue()
     }
 
@@ -354,5 +442,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         stopGpsUpdates()
         bleManager.disconnectDevice()
         remote.disconnect().enqueue()
+        tts?.shutdown()
+        tts = null
     }
 }

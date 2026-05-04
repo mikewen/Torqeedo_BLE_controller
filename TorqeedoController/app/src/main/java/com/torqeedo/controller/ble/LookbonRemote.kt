@@ -158,7 +158,7 @@ class LookbonRemote(context: Context) : BleManager(context) {
         mainHandler.post { onCommand?.invoke(cmd) }
     }
 
-    fun connectToDevice(device: BluetoothDevice) {
+    fun connectToDevice(device: BluetoothDevice, autoReconnect: Boolean = false) {
         setConnectionObserver(object : ConnectionObserver {
             override fun onDeviceConnecting(d: BluetoothDevice) = Unit
             override fun onDeviceDisconnecting(d: BluetoothDevice) = Unit
@@ -178,7 +178,7 @@ class LookbonRemote(context: Context) : BleManager(context) {
         })
         connect(device)
             .retry(3, 300)
-            .useAutoConnect(false)
+            .useAutoConnect(autoReconnect)
             .enqueue()
     }
 
