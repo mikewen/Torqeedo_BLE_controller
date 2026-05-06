@@ -182,6 +182,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     decreaseSpeed()
                     speak("${speedMagnitude.value / 10} percent")
                 }
+                LookbonRemote.Command.START_REPEAT_UP -> {
+                    startAutoIncrease(multiplier = 1)
+                }
+                LookbonRemote.Command.START_REPEAT_DOWN -> {
+                    startAutoDecrease(multiplier = 1)
+                }
+                LookbonRemote.Command.START_REPEAT_UP_FAST -> {
+                    startAutoIncrease(multiplier = 2)
+                }
+                LookbonRemote.Command.START_REPEAT_DOWN_FAST -> {
+                    startAutoDecrease(multiplier = 2)
+                }
+                LookbonRemote.Command.STOP_REPEAT -> {
+                    stopAutoAdjustment()
+                    speak("${speedMagnitude.value / 10} percent")
+                }
                 LookbonRemote.Command.SPEED_UP_FAST -> {
                     repeat(5) { increaseSpeed() }
                     speak("${speedMagnitude.value / 10} percent")
@@ -343,24 +359,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     }
 
     fun stopMotor() {
+        stopAutoAdjustment()
         _speedMagnitude.value = 0
     }
 
-    fun startAutoIncrease() {
+    fun startAutoIncrease(multiplier: Int = 1) {
         autoAdjustmentJob?.cancel()
         autoAdjustmentJob = viewModelScope.launch {
             while (true) {
-                increaseSpeed()
+                repeat(multiplier) { increaseSpeed() }
                 delay(_autoIncrementDelay.value)
             }
         }
     }
 
-    fun startAutoDecrease() {
+    fun startAutoDecrease(multiplier: Int = 1) {
         autoAdjustmentJob?.cancel()
         autoAdjustmentJob = viewModelScope.launch {
             while (true) {
-                decreaseSpeed()
+                repeat(multiplier) { decreaseSpeed() }
                 delay(_autoIncrementDelay.value)
             }
         }
