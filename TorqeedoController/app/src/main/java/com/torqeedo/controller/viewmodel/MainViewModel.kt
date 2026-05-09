@@ -22,6 +22,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.Locale
+import kotlin.math.abs
 
 class MainViewModel(application: Application) : AndroidViewModel(application), TextToSpeech.OnInitListener {
 
@@ -128,11 +129,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     val gpsFix: StateFlow<Boolean> = _gpsFix.asStateFlow()
 
     private var throttleJob: Job? = null
-    private var steerThrottleJob: Job? = null
     private var statusQueryJob: Job? = null
     private var sensorReadJob: Job? = null
     private var autoAdjustmentJob: Job? = null
     private var steerRepeatJob: Job? = null
+    private var resetSteerJob: Job? = null
 
     private var tts: TextToSpeech? = TextToSpeech(application, this)
 
@@ -413,15 +414,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     }
     
     fun resetSteer() {
-        _steerValue.value = 0
+        stopSteerRepeat()
+        resetSteerJob?.cancel()
+        resetSteerJob = viewModelScope.launch {
+            while (_steerValue.value != 0) {
+                val current = _steerValue.value
+                val step = if (abs(current) >= 5) 5 else 1
+                val delta = if (current > 0) -step else step
+                adjustSteer(delta)
+                delay(STEER_REPEAT_DELAY)
+            }
+        }
         speak("Straight")
     }
 
     fun adjustSteer(delta: Int) {
-        _steerValue.value = (_steerValue.value + delta).coerceIn(-STEER_MAX, STEER_MAX)
+        if (delta == 0) return
+        val oldValue = _steerValue.value
+        val newValue = (oldValue + delta).coerceIn(-STEER_MAX, STEER_MAX)
+        val actualDelta = newValue - oldValue
+        if (actualDelta != 0) {
+            _steerValue.value = newValue
+            bleManager.sendSteer(actualDelta)
+        }
     }
 
     fun startSteerRepeat(delta: Int) {
+        resetSteerJob?.cancel()
         steerRepeatJob?.cancel()
         steerRepeatJob = viewModelScope.launch {
             while (true) {
@@ -464,18 +483,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     // ── Loops ─────────────────────────────────────────────────────────────
     private fun startLoops() {
         startThrottleLoop()
-        startSteerThrottleLoop()
         startStatusQueryLoop()
         startSensorReadLoop()
     }
 
     private fun stopLoops() {
         stopThrottleLoop()
-        stopSteerThrottleLoop()
         stopStatusQueryLoop()
         stopSensorReadLoop()
         stopAutoAdjustment()
         stopSteerRepeat()
+        resetSteerJob?.cancel()
     }
 
     private fun startThrottleLoop() {
@@ -494,24 +512,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         throttleJob?.cancel()
         throttleJob = null
         bleManager.sendDrive(0)
-    }
-    
-    private fun startSteerThrottleLoop() {
-        steerThrottleJob?.cancel()
-        steerThrottleJob = viewModelScope.launch {
-            while (true) {
-                if (connectionState.value == TorqeedoBleManager.ConnectionState.CONNECTED) {
-                    bleManager.sendSteer(_steerValue.value)
-                }
-                delay(_throttleDelay.value)
-            }
-        }
-    }
-
-    private fun stopSteerThrottleLoop() {
-        steerThrottleJob?.cancel()
-        steerThrottleJob = null
-        bleManager.sendSteer(0)
     }
 
     private fun startStatusQueryLoop() {

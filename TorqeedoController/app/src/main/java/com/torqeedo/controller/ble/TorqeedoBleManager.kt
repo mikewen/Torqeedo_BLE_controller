@@ -245,6 +245,7 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         val dir = if (value < 0) 'L' else 'R'
         val magnitude = abs(value).coerceAtMost(255).toByte()
         val frame = byteArrayOf('s'.code.toByte(), dir.code.toByte(), magnitude)
+        Log.d(TAG, "SEND_STEER: ${frame.joinToString(" ") { "%02X".format(it) }}")
         logToFile("SEND_STEER", frame)
         writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue()
     }
