@@ -6,11 +6,12 @@ This project implements the **TQ Bus protocol** (proprietary RS485-based protoco
 
 ## Key Features
 *   **Wireless Throttle**: Control speed and direction over Bluetooth.
-*   **Real-time Telemetry**: Monitor Motor RPM, Temperature (°C), and **Battery Current (Amps)**.
+*   **Digital Steering**: Integrated steering control with precise incremental steps and center reset.
+*   **Real-time Telemetry**: Monitor Motor RPM, Temperature (°C), **Battery Current (Amps)**, and **Steering Position**.
 *   **Power Estimation**: Calculate estimated power consumption in Watts based on current sensor data and an assumed 47V bus.
-*   **LOOKBON Remote Support**: Full integration with LOOKBON BLE remotes for tactile throttle and direction control.
+*   **LOOKBON Remote Support**: Full integration with LOOKBON BLE remotes for tactile throttle, steering, and direction control.
 *   **Auto-Reconnect**: Automatically restores connection to the BLE Remote when powered on (persists across app restarts).
-*   **Voice Feedback**: Text-to-speech prompts for connection status ("Motor connected", "Remote disconnected") and throttle changes.
+*   **Voice Feedback**: Text-to-speech prompts for connection status ("Motor connected", "Remote disconnected"), throttle changes, and steering actions.
 *   **Persistent Settings**: "Raw Data", "Logging", and "Voice Prompts" preferences are saved automatically.
 *   **Safety First**: Automatic motor stop on BLE disconnection (via 500ms hardware watchdog).
 *   **Modern UI**: High-contrast, dark nautical theme with improved button visibility for outdoor use.
@@ -26,6 +27,7 @@ Android Smartphone           BLE Bridge (AC6328)          Torqeedo Motor
 (The App)                    (Firmware)                   (Internal ECU)
 ──────────────               ─────────────────            ──────────────
 buildDrive(speed) ──BLE ae10──▶ uart_write(frame) ──RS485──▶ TQ Bus Input
+sendSteer(value)  ──BLE ae10──▶ uart_write(cmd)   ──GPIO ──▶ Steering Actuator
 parseStatus(raw)  ◀─BLE ae02── uart_rx_callback   ◀─RS485── STATUS Reply
 readCurrent()     ◀─BLE ae10── CC6903 Sensor Val
 ```
@@ -41,17 +43,20 @@ readCurrent()     ◀─BLE ae10── CC6903 Sensor Val
 | Component | Function |
 | :--- | :--- |
 | **Forward/Reverse Switch** | Large central toggle to flip motor direction. |
-| **Speed (+) Button** | **Tap**: +2% Speed. **Hold**: Smoothly increase speed (10%/sec). |
-| **Speed (−) Button** | **Tap**: -2% Speed. **Hold**: Smoothly decrease speed (10%/sec). |
+| **Speed (+) / (−)** | **Tap**: ±2% Speed. **Hold**: Smoothly adjust speed (10%/sec). |
+| **Steer (L1/R1, L5/R5)** | Adjust steering angle. **L1/R1** for fine tuning, **L5/R5** for coarse. **Hold** for repeat. |
 | **STOP Button** | Immediately resets speed magnitude to 0%. |
-| **Telemetry Card** | Displays real-time RPM, Course, SOG (Knots), **Amps**, and **Estimated Watts (47V)**. |
+| **RESET Button** | Centers the steering (returns value to 0). |
+| **Telemetry Card** | Displays RPM, Course, SOG (Knots), **Amps**, **Watts**, and **Steer Position**. |
 
 ### Remote Control Mapping (LOOKBON)
 The app maps the following buttons on the LOOKBON BLE remote:
 *   **Joystick Up/Down**: Increase/Decrease speed.
-*   **Joystick Left/Right**: Toggle Direction (Forward/Reverse).
+*   **Joystick Left/Right**: Steer Left/Right.
+*   **Buttons A / B**: Steer Right / Left. **Hold** for continuous steering.
+*   **Buttons C / D**: Speed Up / Down. **Hold** for smooth acceleration.
 *   **Center Button (@)**: Emergency STOP.
-*   **Trigger (R) + Thumb Up/Down**: Fast speed adjustment (10% steps).
+*   **Trigger (R) + Button C/D**: Fast speed adjustment (Double increment rate).
 
 ## Development
 
@@ -72,4 +77,4 @@ The app maps the following buttons on the LOOKBON BLE remote:
 *   [Material Components](https://github.com/material-components/material-components-android): Modern UI components.
 
 ## Keywords
-Torqeedo Control, Electric Outboard, Travel 1003, BLE Throttle, Boat Motor App, RS485 BLE, AC6328, ESP32 Boat Control, TQ Bus Protocol, Current Sensor CC6903, Power Monitoring, BLE Remote Control.
+Torqeedo Control, Electric Outboard, Travel 1003, BLE Throttle, Boat Motor App, RS485 BLE, AC6328, ESP32 Boat Control, TQ Bus Protocol, Current Sensor CC6903, Power Monitoring, BLE Remote Control, Digital Steering.

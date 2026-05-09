@@ -42,7 +42,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         private const val DEFAULT_AUTO_DELAY = 200L      // 5 steps per second (10% / sec)
         private const val DEFAULT_THROTTLE_DELAY = 200L  // 5 Hz throttle loop
         private const val STATUS_QUERY_DELAY = 500L      // 2 Hz status query
-        private const val SENSOR_READ_DELAY = 200L      // 5 Hz current sensor read
+        private const val SENSOR_READ_DELAY = 200L       // 5 Hz current sensor read
+        
+        private const val REMOTE_STEER_STEP = 1          // Small step for hold/repeat
+        private const val REMOTE_STEER_CLICK_STEP = 5    // Larger step for single click
+        private const val STEER_REPEAT_DELAY = 80L      // 12.5 Hz repeat rate for steering
+        const val STEER_MAX = 50
     }
 
     private val prefs: SharedPreferences = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -107,6 +112,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             if (dir == Direction.FORWARD) mag else -mag
         }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
+    private val _steerValue = MutableStateFlow(0)
+    val steerValue: StateFlow<Int> = _steerValue.asStateFlow()
+
     // GPS State
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(application)
     
@@ -120,9 +128,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     val gpsFix: StateFlow<Boolean> = _gpsFix.asStateFlow()
 
     private var throttleJob: Job? = null
+    private var steerThrottleJob: Job? = null
     private var statusQueryJob: Job? = null
     private var sensorReadJob: Job? = null
     private var autoAdjustmentJob: Job? = null
+    private var steerRepeatJob: Job? = null
 
     private var tts: TextToSpeech? = TextToSpeech(application, this)
 
@@ -214,6 +224,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     val newDir = if (direction.value == Direction.FORWARD) Direction.REVERSE else Direction.FORWARD
                     setDirection(newDir)
                     speak(newDir.name.lowercase())
+                }
+                LookbonRemote.Command.STEER_LEFT -> {
+                    speak("Left")
+                    adjustSteer(-REMOTE_STEER_CLICK_STEP)
+                }
+                LookbonRemote.Command.STEER_RIGHT -> {
+                    speak("Right")
+                    adjustSteer(REMOTE_STEER_CLICK_STEP)
+                }
+                LookbonRemote.Command.START_STEER_LEFT -> {
+                    speak("Left")
+                    startSteerRepeat(-REMOTE_STEER_STEP)
+                }
+                LookbonRemote.Command.START_STEER_RIGHT -> {
+                    speak("Right")
+                    startSteerRepeat(REMOTE_STEER_STEP)
+                }
+                LookbonRemote.Command.STOP_STEER -> {
+                    stopSteerRepeat()
                 }
             }
         }
@@ -351,16 +380,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     }
 
     fun increaseSpeed() {
-        _speedMagnitude.value = (_speedMagnitude.value + _speedStep.value).coerceAtMost(SPEED_MAX)
+        if (_direction.value == Direction.FORWARD) {
+            _speedMagnitude.value = (_speedMagnitude.value + _speedStep.value).coerceAtMost(SPEED_MAX)
+        } else {
+            val next = _speedMagnitude.value - _speedStep.value
+            if (next < 0) {
+                _direction.value = Direction.FORWARD
+                _speedMagnitude.value = -next
+            } else {
+                _speedMagnitude.value = next
+            }
+        }
     }
 
     fun decreaseSpeed() {
-        _speedMagnitude.value = (_speedMagnitude.value - _speedStep.value).coerceAtLeast(SPEED_MIN)
+        if (_direction.value == Direction.REVERSE) {
+            _speedMagnitude.value = (_speedMagnitude.value + _speedStep.value).coerceAtMost(SPEED_MAX)
+        } else {
+            val next = _speedMagnitude.value - _speedStep.value
+            if (next < 0) {
+                _direction.value = Direction.REVERSE
+                _speedMagnitude.value = -next
+            } else {
+                _speedMagnitude.value = next
+            }
+        }
     }
 
     fun stopMotor() {
         stopAutoAdjustment()
         _speedMagnitude.value = 0
+    }
+    
+    fun resetSteer() {
+        _steerValue.value = 0
+        speak("Straight")
+    }
+
+    fun adjustSteer(delta: Int) {
+        _steerValue.value = (_steerValue.value + delta).coerceIn(-STEER_MAX, STEER_MAX)
+    }
+
+    fun startSteerRepeat(delta: Int) {
+        steerRepeatJob?.cancel()
+        steerRepeatJob = viewModelScope.launch {
+            while (true) {
+                adjustSteer(delta)
+                delay(STEER_REPEAT_DELAY)
+            }
+        }
+    }
+
+    fun stopSteerRepeat() {
+        steerRepeatJob?.cancel()
+        steerRepeatJob = null
     }
 
     fun startAutoIncrease(multiplier: Int = 1) {
@@ -391,14 +464,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     // ── Loops ─────────────────────────────────────────────────────────────
     private fun startLoops() {
         startThrottleLoop()
+        startSteerThrottleLoop()
         startStatusQueryLoop()
         startSensorReadLoop()
     }
 
     private fun stopLoops() {
         stopThrottleLoop()
+        stopSteerThrottleLoop()
         stopStatusQueryLoop()
         stopSensorReadLoop()
+        stopAutoAdjustment()
+        stopSteerRepeat()
     }
 
     private fun startThrottleLoop() {
@@ -418,6 +495,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         throttleJob = null
         bleManager.sendDrive(0)
     }
+    
+    private fun startSteerThrottleLoop() {
+        steerThrottleJob?.cancel()
+        steerThrottleJob = viewModelScope.launch {
+            while (true) {
+                if (connectionState.value == TorqeedoBleManager.ConnectionState.CONNECTED) {
+                    bleManager.sendSteer(_steerValue.value)
+                }
+                delay(_throttleDelay.value)
+            }
+        }
+    }
+
+    private fun stopSteerThrottleLoop() {
+        steerThrottleJob?.cancel()
+        steerThrottleJob = null
+        bleManager.sendSteer(0)
+    }
 
     private fun startStatusQueryLoop() {
         statusQueryJob?.cancel()
@@ -425,6 +520,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             while (true) {
                 if (connectionState.value == TorqeedoBleManager.ConnectionState.CONNECTED) {
                     bleManager.sendStatusQuery()
+                    // Alternating status query for steering motor if needed?
+                    // For now just querying motor.
                 }
                 delay(STATUS_QUERY_DELAY)
             }

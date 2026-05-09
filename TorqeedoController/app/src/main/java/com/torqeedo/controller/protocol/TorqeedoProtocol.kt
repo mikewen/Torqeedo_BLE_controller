@@ -15,6 +15,8 @@ object TorqeedoProtocol {
     const val FOOTER: Byte = 0xAD.toByte()
 
     const val MOTOR_ADDR: Byte = 0x30.toByte()
+    const val STEER_ADDR: Byte = 0x38.toByte()
+    
     const val MSGID_DRIVE: Byte = 0x82.toByte()
     const val MSGID_STATUS: Byte = 0x83.toByte() // Status query message ID
 
@@ -132,12 +134,14 @@ object TorqeedoProtocol {
     // =========================
     // BUILD DRIVE (AC ... AD)
     // =========================
-    fun buildDrive(speed: Int): ByteArray {
+    fun buildDrive(speed: Int): ByteArray = buildDrive(MOTOR_ADDR, speed)
+
+    fun buildDrive(addr: Byte, speed: Int): ByteArray {
         val s = speed.coerceIn(-1000, 1000)
         val sHi = ((s shr 8) and 0xFF).toByte()
         val sLo = (s and 0xFF).toByte()
         val powerPct = (abs(s) / 10).toByte()
-        val raw = byteArrayOf(MOTOR_ADDR, MSGID_DRIVE, DRIVE_FLAGS, powerPct, sHi, sLo)
+        val raw = byteArrayOf(addr, MSGID_DRIVE, DRIVE_FLAGS, powerPct, sHi, sLo)
         val crc = crc8Maxim(raw)
         return byteArrayOf(HEADER, *raw, crc, FOOTER)
     }
@@ -145,8 +149,8 @@ object TorqeedoProtocol {
     // =========================
     // BUILD STATUS QUERY
     // =========================
-    fun buildStatusQuery(): ByteArray {
-        val raw = byteArrayOf(MOTOR_ADDR, MSGID_STATUS)
+    fun buildStatusQuery(addr: Byte = MOTOR_ADDR): ByteArray {
+        val raw = byteArrayOf(addr, MSGID_STATUS)
         val crc = crc8Maxim(raw)
         return byteArrayOf(HEADER, *raw, crc, FOOTER)
     }
@@ -375,14 +379,15 @@ object TorqeedoProtocol {
 
         // -------- AC ... AD FRAMES (with footer) --------
         if (frame.last() == FOOTER && frame.size >= 5) {
-            if (frame.size >= 9 && (frame[1].toInt() and 0xFF) == 0x30) {
-                log("0x30 frame (motor): ${frame.joinToString(" ") { "%02X".format(it) }}")
+            val addr = frame[1].toInt() and 0xFF
+            if (frame.size >= 9 && (addr == 0x30 || addr == 0x38)) {
+                log("0x${addr.toString(16)} frame: ${frame.joinToString(" ") { "%02X".format(it) }}")
 
                 if (frame.size == 9) {
                     val dataToCrc = frame.sliceArray(1 until 7)
                     val crcRx = frame[7]
                     if (crcRx == crc8Maxim(dataToCrc)) {
-                        log("  -> Valid drive response (CRC ok)")
+                        log("  -> Valid response (CRC ok)")
                         return MotorStatus(rawBytes = frame)
                     } else {
                         log("  -> CRC mismatch")

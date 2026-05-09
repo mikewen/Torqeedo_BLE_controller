@@ -128,9 +128,39 @@ class MainActivity : AppCompatActivity() {
             true
         }
 
+        // Steering Buttons with repeat support
+        listOf(
+            binding.btnSteerL5 to -5,
+            binding.btnSteerL1 to -1,
+            binding.btnSteerR1 to 1,
+            binding.btnSteerR5 to 5
+        ).forEach { (btn, delta) ->
+            btn.setOnTouchListener { v, event ->
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        v.isPressed = true
+                        vm.adjustSteer(delta)
+                        v.postDelayed({
+                            if (v.isPressed) vm.startSteerRepeat(delta)
+                        }, 400)
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        vm.stopSteerRepeat()
+                        v.isPressed = false
+                    }
+                }
+                true
+            }
+        }
+
         // Stop Button
         binding.btnStop.setOnClickListener {
             vm.stopMotor()
+        }
+
+        // Reset Steer Button
+        binding.btnResetSteer.setOnClickListener {
+            vm.resetSteer()
         }
 
         // Disconnect Button
@@ -248,6 +278,17 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     vm.estimatedPowerW.collectLatest { power ->
                         binding.tvPower.text = "%.0f".format(power)
+                    }
+                }
+
+                launch {
+                    vm.steerValue.collectLatest { steer ->
+                        binding.tvSteer.text = when {
+                            steer > 0 -> "R"
+                            steer < 0 -> "L"
+                            else -> "0"
+                        }
+                        binding.tvSteerValue.text = steer.toString()
                     }
                 }
 

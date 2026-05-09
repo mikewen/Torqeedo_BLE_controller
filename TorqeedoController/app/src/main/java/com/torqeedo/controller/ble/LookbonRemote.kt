@@ -28,7 +28,12 @@ class LookbonRemote(context: Context) : BleManager(context) {
         START_REPEAT_DOWN,
         START_REPEAT_UP_FAST,
         START_REPEAT_DOWN_FAST,
-        STOP_REPEAT
+        STOP_REPEAT,
+        STEER_LEFT,
+        STEER_RIGHT,
+        START_STEER_LEFT,
+        START_STEER_RIGHT,
+        STOP_STEER
     }
 
     companion object {
@@ -118,11 +123,15 @@ class LookbonRemote(context: Context) : BleManager(context) {
             event == 'A' && btn == 1 -> emit(Command.STOP)
             event == 'B' && btn == 1 -> emit(Command.STOP)
 
-            // Thumb buttons: A=Right, B=Left, C=Up, D=Down
-            event == 'A' && btn == 2 -> emit(Command.TOGGLE_DIRECTION)
-            event == 'A' && btn == 3 -> emit(Command.TOGGLE_DIRECTION)
+            // Button A (Right) - Steering
+            event == 'B' && btn == 2 -> emit(Command.START_STEER_RIGHT)
+            event == 'C' && btn == 2 -> emit(Command.STOP_STEER)
             
-            // C (Up) - Hold support
+            // Button B (Left) - Steering
+            event == 'B' && btn == 3 -> emit(Command.START_STEER_LEFT)
+            event == 'C' && btn == 3 -> emit(Command.STOP_STEER)
+            
+            // Button C (Up) - Speed Up / Repeat
             event == 'B' && btn == 4 -> {
                 if (rHeld) emit(Command.START_REPEAT_UP_FAST) else emit(Command.START_REPEAT_UP)
             }
@@ -130,7 +139,7 @@ class LookbonRemote(context: Context) : BleManager(context) {
                 emit(Command.STOP_REPEAT)
             }
 
-            // D (Down) - Hold support
+            // Button D (Down) - Speed Down / Repeat
             event == 'B' && btn == 5 -> {
                 if (rHeld) emit(Command.START_REPEAT_DOWN_FAST) else emit(Command.START_REPEAT_DOWN)
             }
@@ -138,7 +147,9 @@ class LookbonRemote(context: Context) : BleManager(context) {
                 emit(Command.STOP_REPEAT)
             }
 
-            // Fallback for single clicks if the remote sends 'A' for these buttons
+            // Fallback for single clicks (A event)
+            event == 'A' && btn == 2 -> emit(Command.STEER_RIGHT)
+            event == 'A' && btn == 3 -> emit(Command.STEER_LEFT)
             event == 'A' && btn == 4 -> if (rHeld) emit(Command.SPEED_UP_FAST) else emit(Command.SPEED_UP)
             event == 'A' && btn == 5 -> if (rHeld) emit(Command.SPEED_DOWN_FAST) else emit(Command.SPEED_DOWN)
         }
@@ -147,16 +158,17 @@ class LookbonRemote(context: Context) : BleManager(context) {
     private fun handleJoystick(dir: Int) {
         if (dir == lastJoystickDir) return
         
-        // Stop any current repeat when joystick moves or centers
+        // Stop any current repeat or steering when joystick moves or centers
         if (lastJoystickDir != 0) {
             emit(Command.STOP_REPEAT)
+            emit(Command.STOP_STEER)
         }
 
         when (dir) {
             1 -> emit(Command.START_REPEAT_UP)
             2 -> emit(Command.START_REPEAT_DOWN)
-            3 -> emit(Command.TOGGLE_DIRECTION)
-            4 -> emit(Command.TOGGLE_DIRECTION)
+            3 -> emit(Command.START_STEER_LEFT)
+            4 -> emit(Command.START_STEER_RIGHT)
         }
         
         lastJoystickDir = dir

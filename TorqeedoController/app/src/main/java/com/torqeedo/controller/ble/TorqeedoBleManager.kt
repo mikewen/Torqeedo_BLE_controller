@@ -235,14 +235,31 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
     fun sendDrive(speed: Int) {
         val char = ae10Char ?: return
         val frame = TorqeedoProtocol.buildDrive(speed)
-        logToFile("SEND", frame)
+        logToFile("SEND_DRIVE", frame)
+        writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue()
+    }
+    
+    fun sendSteer(value: Int) {
+        val char = ae10Char ?: return
+        // Custom 3-byte command: [ 's', 'L'|'R', magnitude ]
+        val dir = if (value < 0) 'L' else 'R'
+        val magnitude = abs(value).coerceAtMost(255).toByte()
+        val frame = byteArrayOf('s'.code.toByte(), dir.code.toByte(), magnitude)
+        logToFile("SEND_STEER", frame)
         writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue()
     }
 
     fun sendStatusQuery() {
         val char = ae10Char ?: return
-        val frame = TorqeedoProtocol.buildStatusQuery()
+        val frame = TorqeedoProtocol.buildStatusQuery(TorqeedoProtocol.MOTOR_ADDR)
         logToFile("SEND_STAT", frame)
+        writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue()
+    }
+    
+    fun sendSteerStatusQuery() {
+        val char = ae10Char ?: return
+        val frame = TorqeedoProtocol.buildStatusQuery(TorqeedoProtocol.STEER_ADDR)
+        logToFile("SEND_STAT_STEER", frame)
         writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue()
     }
 
