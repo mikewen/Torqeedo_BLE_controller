@@ -10,10 +10,13 @@ import android.os.Build
 import android.os.Bundle
 import android.view.MotionEvent
 import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.widget.SeekBar
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -153,6 +156,34 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Steer Scale SeekBar
+        binding.seekBarSteerScale.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) vm.setSteerScale(progress)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        // Steer Scale EditText
+        binding.etSteerScale.setOnEditorActionListener { v, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                val value = v.text.toString().toIntOrNull() ?: 0
+                vm.setSteerScale(value.coerceIn(0, 10000)) // Allowing up to 10s if typed
+                v.clearFocus()
+                true
+            } else {
+                false
+            }
+        }
+        
+        binding.etSteerScale.doAfterTextChanged { s ->
+            if (binding.etSteerScale.hasFocus()) {
+                val value = s.toString().toIntOrNull() ?: 0
+                vm.setSteerScale(value.coerceIn(0, 10000))
+            }
+        }
+
         // Stop Button
         binding.btnStop.setOnClickListener {
             vm.stopMotor()
@@ -253,6 +284,15 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     vm.enableVoicePrompts.collectLatest { enabled ->
                         binding.switchVoice.isChecked = enabled
+                    }
+                }
+
+                launch {
+                    vm.steerScale.collectLatest { scale ->
+                        if (!binding.etSteerScale.hasFocus()) {
+                            binding.etSteerScale.setText(scale.toString())
+                        }
+                        binding.seekBarSteerScale.progress = scale.coerceAtMost(binding.seekBarSteerScale.max)
                     }
                 }
 

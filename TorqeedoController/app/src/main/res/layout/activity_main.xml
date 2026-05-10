@@ -488,6 +488,43 @@
                             android:textSize="11sp"
                             android:layout_marginStart="4dp"/>
                     </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginTop="16dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Runtime Scale (ms)"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+
+                        <EditText
+                            android:id="@+id/etSteerScale"
+                            android:layout_width="60dp"
+                            android:layout_height="wrap_content"
+                            android:text="10"
+                            android:textColor="@color/text_primary"
+                            android:textSize="14sp"
+                            android:inputType="number"
+                            android:gravity="center"
+                            android:background="@color/bg_primary"
+                            android:padding="4dp"
+                            android:layout_marginEnd="8dp"
+                            android:imeOptions="actionDone"/>
+
+                        <SeekBar
+                            android:id="@+id/seekBarSteerScale"
+                            android:layout_width="140dp"
+                            android:layout_height="wrap_content"
+                            android:max="500"
+                            android:progress="10" />
+                    </LinearLayout>
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 

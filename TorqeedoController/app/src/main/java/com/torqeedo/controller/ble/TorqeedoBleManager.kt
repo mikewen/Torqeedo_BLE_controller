@@ -243,12 +243,14 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue()
     }
     
-    fun sendSteer(value: Int) {
+    fun sendSteer(value: Int, runtimeMs: Int = 0) {
         val char = ae03Char ?: return
-        // Custom 3-byte command: [ 's', 'L'|'R', magnitude ]
+        // Custom 5-byte command: [ 's', 'L'|'R', PWM, rtLo, rtHi ]
         val dir = if (value < 0) 'L' else 'R'
-        val magnitude = abs(value).coerceAtMost(255).toByte()
-        val frame = byteArrayOf('s'.code.toByte(), dir.code.toByte(), magnitude)
+        val power: Byte = 100 // PWM/Power always 100 for now
+        val rtLo = (runtimeMs and 0xFF).toByte()
+        val rtHi = ((runtimeMs shr 8) and 0xFF).toByte()
+        val frame = byteArrayOf('s'.code.toByte(), dir.code.toByte(), power, rtLo, rtHi)
         Log.d(TAG, "SEND_STEER: ${frame.joinToString(" ") { "%02X".format(it) }}")
         logToFile("SEND_STEER", frame)
         writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE).enqueue()

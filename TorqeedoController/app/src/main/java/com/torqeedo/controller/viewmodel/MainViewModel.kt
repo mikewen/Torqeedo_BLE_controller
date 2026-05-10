@@ -35,6 +35,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         private const val KEY_LOGGING = "logging"
         private const val KEY_VOICE = "voice"
         private const val KEY_REMOTE_MAC = "remote_mac"
+        private const val KEY_STEER_SCALE = "steer_scale"
 
         const val SPEED_MAX = 1000
         const val SPEED_MIN = 0
@@ -49,6 +50,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         private const val REMOTE_STEER_CLICK_STEP = 5    // Larger step for single click
         private const val STEER_REPEAT_DELAY = 80L      // 12.5 Hz repeat rate for steering
         const val STEER_MAX = 50
+        private const val DEFAULT_STEER_SCALE = 10
     }
 
     private val prefs: SharedPreferences = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -75,6 +77,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     private val _enableVoicePrompts = MutableStateFlow(prefs.getBoolean(KEY_VOICE, true))
     val enableVoicePrompts: StateFlow<Boolean> = _enableVoicePrompts.asStateFlow()
+
+    private val _steerScale = MutableStateFlow(prefs.getInt(KEY_STEER_SCALE, DEFAULT_STEER_SCALE))
+    val steerScale: StateFlow<Int> = _steerScale.asStateFlow()
 
     private val bluetoothAdapter: BluetoothAdapter =
         (application.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
@@ -333,6 +338,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         prefs.edit().putBoolean(KEY_VOICE, enabled).apply()
     }
 
+    fun setSteerScale(scale: Int) {
+        _steerScale.value = scale
+        prefs.edit().putInt(KEY_STEER_SCALE, scale).apply()
+    }
+
     // ── Connect / disconnect ──────────────────────────────────────────────
     fun connect(device: DiscoveredDevice) {
         scanner.stopScan()
@@ -435,7 +445,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         val actualDelta = newValue - oldValue
         if (actualDelta != 0) {
             _steerValue.value = newValue
-            bleManager.sendSteer(actualDelta)
+            val runtimeMs = abs(actualDelta) * _steerScale.value
+            bleManager.sendSteer(actualDelta, runtimeMs)
         }
     }
 
