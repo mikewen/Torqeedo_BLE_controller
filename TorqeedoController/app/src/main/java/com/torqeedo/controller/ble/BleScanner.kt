@@ -68,7 +68,7 @@ class BleScanner(private val adapter: BluetoothAdapter) {
         } else {
             listOf(
                 ScanFilter.Builder().setDeviceName("AC6328_UART").build(),
-                ScanFilter.Builder().setDeviceName("GPS_Rudder").build(),
+                ScanFilter.Builder().setDeviceName("GPS_Steer").build(),
                 ScanFilter.Builder().setDeviceName("LOOKBON").build()
             )
         }

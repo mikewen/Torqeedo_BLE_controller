@@ -35,10 +35,12 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         
         val CHAR_AE10_UUID: UUID  = UUID.fromString("0000ae10-0000-1000-8000-00805f9b34fb")
         val CHAR_AE02_UUID: UUID  = UUID.fromString("0000ae02-0000-1000-8000-00805f9b34fb")
+        val CHAR_AE03_UUID: UUID  = UUID.fromString("0000ae03-0000-1000-8000-00805f9b34fb")
     }
 
     private var ae10Char: BluetoothGattCharacteristic? = null
     private var ae02Char: BluetoothGattCharacteristic? = null
+    private var ae03Char: BluetoothGattCharacteristic? = null
 
     private var isLoggingEnabled = true
     private var isRawDataEnabled = true
@@ -137,7 +139,8 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
 
             ae10Char = service.getCharacteristic(CHAR_AE10_UUID)
             ae02Char = service.getCharacteristic(CHAR_AE02_UUID)
-            return ae10Char != null && ae02Char != null
+            ae03Char = service.getCharacteristic(CHAR_AE03_UUID)
+            return ae10Char != null && ae02Char != null && ae03Char != null
         }
 
         override fun initialize() {
@@ -157,6 +160,7 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         override fun onServicesInvalidated() {
             ae10Char = null
             ae02Char = null
+            ae03Char = null
         }
     }
 
@@ -240,14 +244,14 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
     }
     
     fun sendSteer(value: Int) {
-        val char = ae10Char ?: return
+        val char = ae03Char ?: return
         // Custom 3-byte command: [ 's', 'L'|'R', magnitude ]
         val dir = if (value < 0) 'L' else 'R'
         val magnitude = abs(value).coerceAtMost(255).toByte()
         val frame = byteArrayOf('s'.code.toByte(), dir.code.toByte(), magnitude)
         Log.d(TAG, "SEND_STEER: ${frame.joinToString(" ") { "%02X".format(it) }}")
         logToFile("SEND_STEER", frame)
-        writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue()
+        writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE).enqueue()
     }
 
     fun sendStatusQuery() {
