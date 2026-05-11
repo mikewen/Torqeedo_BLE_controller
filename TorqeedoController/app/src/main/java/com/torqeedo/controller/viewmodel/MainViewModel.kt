@@ -36,6 +36,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         private const val KEY_VOICE = "voice"
         private const val KEY_REMOTE_MAC = "remote_mac"
         private const val KEY_STEER_SCALE = "steer_scale"
+        
+        private const val KEY_CALIB_ZERO = "calib_zero"
+        private const val KEY_CALIB_PORT = "calib_port"
+        private const val KEY_CALIB_STBD = "calib_stbd"
 
         const val SPEED_MAX = 1000
         const val SPEED_MIN = 0
@@ -47,7 +51,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         private const val SENSOR_READ_DELAY = 200L       // 5 Hz current sensor read
         
         private const val REMOTE_STEER_STEP = 1          // Small step for hold/repeat
-        private const val REMOTE_STEER_CLICK_STEP = 5    // Larger step for single click
+        private const val REMOTE_STEER_CLICK_STEP = 1    // Larger step for single click
         private const val STEER_REPEAT_DELAY = 80L      // 12.5 Hz repeat rate for steering
         const val STEER_MAX = 50
         private const val DEFAULT_STEER_SCALE = 10
@@ -121,6 +125,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private val _steerValue = MutableStateFlow(0)
     val steerValue: StateFlow<Int> = _steerValue.asStateFlow()
 
+    // Magnetometer / Rudder Position
+    private val _magX = MutableStateFlow(0)
+    val magX: StateFlow<Int> = _magX.asStateFlow()
+    private val _magY = MutableStateFlow(0)
+    val magY: StateFlow<Int> = _magY.asStateFlow()
+    private val _magZ = MutableStateFlow(0)
+    val magZ: StateFlow<Int> = _magZ.asStateFlow()
+
+    // Calibration points (using Y axis as primary for rudder position)
+    private val _calibZero = MutableStateFlow(prefs.getInt(KEY_CALIB_ZERO, 0))
+    private val _calibPort = MutableStateFlow(prefs.getInt(KEY_CALIB_PORT, 0))
+    private val _calibStbd = MutableStateFlow(prefs.getInt(KEY_CALIB_STBD, 0))
+
+    val rudderPosition = combine(_magY, _calibZero, _calibPort, _calibStbd) { y, zero, port, stbd ->
+        val diff = (y - zero).toFloat()
+        if (abs(diff) < 1f) return@combine 0f
+        
+        val portRange = (port - zero).toFloat()
+        val stbdRange = (stbd - zero).toFloat()
+        
+        val pos = when {
+            abs(portRange) > 10 && (diff / portRange) > 0 -> {
+                (diff / portRange) * -100f
+            }
+            abs(stbdRange) > 10 && (diff / stbdRange) > 0 -> {
+                (diff / stbdRange) * 100f
+            }
+            else -> 0f
+        }
+        pos.coerceIn(-100f, 100f)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
+
     // GPS State
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(application)
     
@@ -145,6 +181,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     init {
         setupRemote()
         setupConnectionVoice()
+        setupMagnetometer()
         
         // Initial setup for managers from persisted values
         bleManager.setRawDataEnabled(_showRawData.value)
@@ -266,6 +303,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
+    private fun setupMagnetometer() {
+        viewModelScope.launch {
+            bleManager.magnetometerData.collect { bytes ->
+                if (bytes.size >= 8) {
+                    // MMC5603 20-bit data unpacking
+                    // Byte 0: X[19:12], Byte 1: X[11:4], Byte 2: Y[19:12], Byte 3: Y[11:4]
+                    // Byte 4: Z[19:12], Byte 5: Z[11:4]
+                    // Byte 6: X[3:0] (hi), Y[3:0] (lo)
+                    // Byte 7: Z[3:0] (hi), ???
+                    
+                    val xUnsigned = ((bytes[0].toInt() and 0xFF) shl 12) or 
+                                    ((bytes[1].toInt() and 0xFF) shl 4) or 
+                                    ((bytes[6].toInt() and 0xF0) shr 4)
+                                    
+                    val yUnsigned = ((bytes[2].toInt() and 0xFF) shl 12) or 
+                                    ((bytes[3].toInt() and 0xFF) shl 4) or 
+                                    (bytes[6].toInt() and 0x0F)
+                                    
+                    val zUnsigned = ((bytes[4].toInt() and 0xFF) shl 12) or 
+                                    ((bytes[5].toInt() and 0xFF) shl 4) or 
+                                    ((bytes[7].toInt() and 0xF0) shr 4)
+
+                    // MMC5603 offset is 2^19 (524288) for 0 field.
+                    _magX.value = xUnsigned - 524288
+                    _magY.value = yUnsigned - 524288
+                    _magZ.value = zUnsigned - 524288
+                }
+            }
+        }
+    }
+
     // ── GPS ───────────────────────────────────────────────────────────────
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(locationResult: LocationResult) {
@@ -341,6 +409,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     fun setSteerScale(scale: Int) {
         _steerScale.value = scale
         prefs.edit().putInt(KEY_STEER_SCALE, scale).apply()
+    }
+
+    // ── Calibration ───────────────────────────────────────────────────────
+    fun calibrateZero() {
+        val currentY = _magY.value
+        _calibZero.value = currentY
+        prefs.edit().putInt(KEY_CALIB_ZERO, currentY).apply()
+        speak("Zero set")
+    }
+
+    fun calibratePort() {
+        val currentY = _magY.value
+        _calibPort.value = currentY
+        prefs.edit().putInt(KEY_CALIB_PORT, currentY).apply()
+        speak("Port max set")
+    }
+
+    fun calibrateStbd() {
+        val currentY = _magY.value
+        _calibStbd.value = currentY
+        prefs.edit().putInt(KEY_CALIB_STBD, currentY).apply()
+        speak("Starboard max set")
     }
 
     // ── Connect / disconnect ──────────────────────────────────────────────

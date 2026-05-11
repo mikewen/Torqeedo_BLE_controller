@@ -194,6 +194,20 @@ class MainActivity : AppCompatActivity() {
             vm.resetSteer()
         }
 
+        // Calibration Buttons
+        binding.btnCalibZero.setOnClickListener {
+            vm.calibrateZero()
+            showSnack("Zero position calibrated")
+        }
+        binding.btnCalibPort.setOnClickListener {
+            vm.calibratePort()
+            showSnack("Port max position calibrated")
+        }
+        binding.btnCalibStbd.setOnClickListener {
+            vm.calibrateStbd()
+            showSnack("Starboard max position calibrated")
+        }
+
         // Disconnect Button
         binding.btnDisconnect.setOnClickListener {
             vm.disconnect()
@@ -329,6 +343,22 @@ class MainActivity : AppCompatActivity() {
                             else -> "0"
                         }
                         binding.tvSteerValue.text = steer.toString()
+                    }
+                }
+
+                // Magnetometer Observation
+                launch {
+                    vm.magX.collectLatest { x -> binding.tvMagX.text = "X: $x" }
+                }
+                launch {
+                    vm.magY.collectLatest { y -> binding.tvMagY.text = "Y: $y" }
+                }
+                launch {
+                    vm.magZ.collectLatest { z -> binding.tvMagZ.text = "Z: $z" }
+                }
+                launch {
+                    vm.rudderPosition.collectLatest { pos ->
+                        binding.tvRudderPos.text = "Rudder: %.1f%%".format(pos)
                     }
                 }
 
