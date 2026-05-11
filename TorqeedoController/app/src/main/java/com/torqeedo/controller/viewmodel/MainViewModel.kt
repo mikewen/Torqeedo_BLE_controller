@@ -310,22 +310,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     // MMC5603 20-bit data unpacking
                     // Byte 0: X[19:12], Byte 1: X[11:4], Byte 2: Y[19:12], Byte 3: Y[11:4]
                     // Byte 4: Z[19:12], Byte 5: Z[11:4]
-                    // Byte 6: X[3:0] (hi), Y[3:0] (lo)
-                    // Byte 7: Z[3:0] (hi), ???
-                    
-                    val xUnsigned = ((bytes[0].toInt() and 0xFF) shl 12) or 
-                                    ((bytes[1].toInt() and 0xFF) shl 4) or 
-                                    ((bytes[6].toInt() and 0xF0) shr 4)
-                                    
-                    val yUnsigned = ((bytes[2].toInt() and 0xFF) shl 12) or 
-                                    ((bytes[3].toInt() and 0xFF) shl 4) or 
-                                    (bytes[6].toInt() and 0x0F)
-                                    
-                    val zUnsigned = ((bytes[4].toInt() and 0xFF) shl 12) or 
-                                    ((bytes[5].toInt() and 0xFF) shl 4) or 
-                                    ((bytes[7].toInt() and 0xF0) shr 4)
+                    val xUnsigned =
+                        ((bytes[0].toInt() and 0xFF) shl 12) or
+                                ((bytes[1].toInt() and 0xFF) shl 4) or
+                                (bytes[6].toInt() and 0x0F)
 
-                    // MMC5603 offset is 2^19 (524288) for 0 field.
+                    val yUnsigned =
+                        ((bytes[2].toInt() and 0xFF) shl 12) or
+                                ((bytes[3].toInt() and 0xFF) shl 4) or
+                                (bytes[7].toInt() and 0x0F)
+
+                    val zUnsigned =
+                        ((bytes[4].toInt() and 0xFF) shl 12) or
+                                ((bytes[5].toInt() and 0xFF) shl 4) or
+                                (bytes[8].toInt() and 0x0F)
+
+                    // Convert unsigned centered-at-524288 format to signed
                     _magX.value = xUnsigned - 524288
                     _magY.value = yUnsigned - 524288
                     _magZ.value = zUnsigned - 524288
