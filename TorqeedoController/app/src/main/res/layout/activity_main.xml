@@ -63,7 +63,7 @@
         android:layout_height="wrap_content"
         android:background="@color/bg_surface"
         android:orientation="horizontal"
-        android:paddingHorizontal="20dp"
+        android:paddingHorizontal="16dp"
         android:paddingVertical="4dp"
         android:gravity="center_vertical"
         app:layout_constraintTop_toBottomOf="@id/statusBar">
@@ -71,10 +71,10 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Raw"
+            android:text="@string/label_raw"
             android:textColor="@color/text_secondary"
-            android:textSize="12sp"
-            android:layout_marginEnd="4dp"/>
+            android:textSize="11sp"
+            android:layout_marginEnd="2dp"/>
 
         <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/switchShowRaw"
@@ -83,15 +83,15 @@
             android:checked="true"
             app:switchMinWidth="32dp" />
 
-        <View android:layout_width="16dp" android:layout_height="match_parent"/>
+        <View android:layout_width="8dp" android:layout_height="match_parent"/>
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Log"
+            android:text="@string/label_log"
             android:textColor="@color/text_secondary"
-            android:textSize="12sp"
-            android:layout_marginEnd="4dp" />
+            android:textSize="11sp"
+            android:layout_marginEnd="2dp" />
 
         <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/switchLogging"
@@ -100,18 +100,35 @@
             android:checked="true"
             app:switchMinWidth="32dp" />
 
-        <View android:layout_width="16dp" android:layout_height="match_parent"/>
+        <View android:layout_width="8dp" android:layout_height="match_parent"/>
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Voice"
+            android:text="@string/label_voice"
             android:textColor="@color/text_secondary"
-            android:textSize="12sp"
-            android:layout_marginEnd="4dp" />
+            android:textSize="11sp"
+            android:layout_marginEnd="2dp" />
 
         <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/switchVoice"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            app:switchMinWidth="32dp" />
+
+        <View android:layout_width="8dp" android:layout_height="match_parent"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/label_mot_stat"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp"
+            android:layout_marginEnd="2dp" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switchShowMotorStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:checked="true"
@@ -126,8 +143,9 @@
         android:orientation="vertical"
         android:padding="20dp"
         app:layout_constraintTop_toBottomOf="@id/debugSettings"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent">
+        app:layout_constraintBottom_toTopOf="@id/controlPanel"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintVertical_weight="1">
 
         <Button
             android:id="@+id/btnScan"
@@ -209,8 +227,9 @@
         android:layout_height="0dp"
         android:visibility="gone"
         android:fillViewport="true"
-        app:layout_constraintTop_toBottomOf="@id/debugSettings"
-        app:layout_constraintBottom_toBottomOf="parent">
+        app:layout_constraintTop_toBottomOf="@id/scanPanel"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintVertical_weight="1">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -628,8 +647,7 @@
 
                         <TextView
                             android:id="@+id/tvSteerValue"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content"
                             android:text="0"
                             android:textColor="@color/accent_primary"
                             android:textSize="22sp"

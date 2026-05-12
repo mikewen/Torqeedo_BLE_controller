@@ -34,6 +34,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         private const val KEY_SHOW_RAW = "show_raw"
         private const val KEY_LOGGING = "logging"
         private const val KEY_VOICE = "voice"
+        private const val KEY_SHOW_MOTOR_STATUS = "show_motor_status"
         private const val KEY_REMOTE_MAC = "remote_mac"
         private const val KEY_STEER_SCALE = "steer_scale"
         
@@ -81,6 +82,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     private val _enableVoicePrompts = MutableStateFlow(prefs.getBoolean(KEY_VOICE, true))
     val enableVoicePrompts: StateFlow<Boolean> = _enableVoicePrompts.asStateFlow()
+
+    private val _showMotorStatus = MutableStateFlow(prefs.getBoolean(KEY_SHOW_MOTOR_STATUS, true))
+    val showMotorStatus: StateFlow<Boolean> = _showMotorStatus.asStateFlow()
 
     private val _steerScale = MutableStateFlow(prefs.getInt(KEY_STEER_SCALE, DEFAULT_STEER_SCALE))
     val steerScale: StateFlow<Int> = _steerScale.asStateFlow()
@@ -419,6 +423,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     fun setEnableVoicePrompts(enabled: Boolean) {
         _enableVoicePrompts.value = enabled
         prefs.edit().putBoolean(KEY_VOICE, enabled).apply()
+    }
+
+    fun setShowMotorStatus(show: Boolean) {
+        _showMotorStatus.value = show
+        prefs.edit().putBoolean(KEY_SHOW_MOTOR_STATUS, show).apply()
     }
 
     fun setSteerScale(scale: Int) {

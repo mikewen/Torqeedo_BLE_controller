@@ -27,6 +27,7 @@ import com.torqeedo.controller.ble.TorqeedoBleManager
 import com.torqeedo.controller.databinding.ActivityMainBinding
 import com.torqeedo.controller.viewmodel.MainViewModel
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
@@ -83,6 +84,9 @@ class MainActivity : AppCompatActivity() {
         }
         binding.switchVoice.setOnCheckedChangeListener { _, isChecked ->
             vm.setEnableVoicePrompts(isChecked)
+        }
+        binding.switchShowMotorStatus.setOnCheckedChangeListener { _, isChecked ->
+            vm.setShowMotorStatus(isChecked)
         }
 
         // Scan Settings
@@ -230,14 +234,25 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
+                    combine(vm.motorConnectionState, vm.imuConnectionState, vm.remoteConnected) { motor, imu, remote ->
+                        val motorConnected = motor == TorqeedoBleManager.ConnectionState.CONNECTED
+                        val imuConnected = imu == TorqeedoBleManager.ConnectionState.CONNECTED
+                        val anyConnected = motorConnected || imuConnected || remote
+                        Pair(anyConnected, motorConnected)
+                    }.collectLatest { (anyConnected, motorConnected) ->
+                        //binding.controlPanel.visibility = if (anyConnected) View.VISIBLE else View.GONE
+                        binding.controlPanel.visibility = if (motorConnected) View.VISIBLE else View.GONE
+                        binding.scanPanel.visibility    = if (motorConnected) View.GONE else View.VISIBLE
+                    }
+                }
+
+                launch {
                     vm.motorConnectionState.collectLatest { state ->
                         when (state) {
                             TorqeedoBleManager.ConnectionState.DISCONNECTED -> {
                                 binding.tvConnectionStatus.text = "Mot: Off"
                                 binding.tvConnectionStatus.setTextColor(
                                     ContextCompat.getColor(this@MainActivity, R.color.status_disconnected))
-                                binding.controlPanel.visibility = View.GONE
-                                binding.scanPanel.visibility    = View.VISIBLE
                             }
                             TorqeedoBleManager.ConnectionState.CONNECTING -> {
                                 binding.tvConnectionStatus.text = "Mot: …"
@@ -248,8 +263,6 @@ class MainActivity : AppCompatActivity() {
                                 binding.tvConnectionStatus.text = "Mot: On"
                                 binding.tvConnectionStatus.setTextColor(
                                     ContextCompat.getColor(this@MainActivity, R.color.status_connected))
-                                binding.scanPanel.visibility    = View.GONE
-                                binding.controlPanel.visibility = View.VISIBLE
                             }
                         }
                     }
@@ -321,6 +334,13 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 launch {
+                    vm.showMotorStatus.collectLatest { show ->
+                        binding.switchShowMotorStatus.isChecked = show
+                        binding.motorDataCard.visibility = if (show) View.VISIBLE else View.GONE
+                    }
+                }
+
+                launch {
                     vm.steerScale.collectLatest { scale ->
                         if (!binding.etSteerScale.hasFocus()) {
                             binding.etSteerScale.setText(scale.toString())
@@ -333,7 +353,12 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     vm.motorStatus.collectLatest { status ->
                         if (status != null) {
-                            binding.tvMotorSoc.text = if (status.voltage > 20f) "%.0f%%".format((status.voltage - 42f) / (52.5f - 42f) * 100f).coerceIn("0%","100%") else "—" // Rough Li-ion estimate if applicable
+                            val soc = if (status.voltage > 42f) {
+                                ((status.voltage - 42f) / (52.5f - 42f) * 100f).coerceIn(0f, 100f)
+                            } else {
+                                0f
+                            }
+                            binding.tvMotorSoc.text = "%.0f%%".format(soc)
                             binding.tvMotorWatts.text = status.powerW.toString()
                             binding.tvMotorVolts.text = "%.1fV".format(status.voltage)
                             binding.tvMotorRpm.text = status.rpm.toString()
