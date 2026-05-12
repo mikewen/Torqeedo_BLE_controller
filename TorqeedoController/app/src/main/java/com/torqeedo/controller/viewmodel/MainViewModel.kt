@@ -88,11 +88,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private val bluetoothAdapter: BluetoothAdapter =
         (application.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
 
-    val bleManager = TorqeedoBleManager(application)
-    val remote     = LookbonRemote(application)
-    val scanner    = BleScanner(bluetoothAdapter)
+    val motorManager = TorqeedoBleManager(application)
+    val imuManager   = TorqeedoBleManager(application)
+    val remote       = LookbonRemote(application)
+    val scanner      = BleScanner(bluetoothAdapter)
 
-    val connectionState: StateFlow<TorqeedoBleManager.ConnectionState> = bleManager.connectionState
+    val motorConnectionState: StateFlow<TorqeedoBleManager.ConnectionState> = motorManager.connectionState
+    val imuConnectionState:   StateFlow<TorqeedoBleManager.ConnectionState> = imuManager.connectionState
     
     private val _remoteConnected = MutableStateFlow(false)
     val remoteConnected: StateFlow<Boolean> = _remoteConnected.asStateFlow()
@@ -100,16 +102,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     val scanResults:     StateFlow<List<DiscoveredDevice>>             = scanner.devices
     val isScanning:      StateFlow<Boolean>                            = scanner.isScanning
     val motorStatus:     StateFlow<TorqeedoProtocol.MotorStatus?>      =
-        bleManager.statusFlow.stateIn(viewModelScope, SharingStarted.Lazily, null)
+        motorManager.statusFlow.stateIn(viewModelScope, SharingStarted.Lazily, null)
     
-    val sensorCurrent: StateFlow<Float> = bleManager.sensorCurrent
+    val sensorCurrent: StateFlow<Float> = motorManager.sensorCurrent
     
     // Estimated Power at 47V
     val estimatedPowerW: StateFlow<Float> = sensorCurrent.map { it * 47.0f }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
 
     val rawStatus: StateFlow<ByteArray?> = 
-        bleManager.rawStatusFlow.stateIn(viewModelScope, SharingStarted.Lazily, null)
+        motorManager.rawStatusFlow.stateIn(viewModelScope, SharingStarted.Lazily, null)
 
     private val _direction = MutableStateFlow(Direction.FORWARD)
     val direction: StateFlow<Direction> = _direction.asStateFlow()
@@ -132,6 +134,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     val magY: StateFlow<Int> = _magY.asStateFlow()
     private val _magZ = MutableStateFlow(0)
     val magZ: StateFlow<Int> = _magZ.asStateFlow()
+
+    // WitMotion IMU Data
+    private val _witRoll = MutableStateFlow(0f)
+    val witRoll: StateFlow<Float> = _witRoll.asStateFlow()
+    private val _witPitch = MutableStateFlow(0f)
+    val witPitch: StateFlow<Float> = _witPitch.asStateFlow()
+    private val _witYaw = MutableStateFlow(0f)
+    val witYaw: StateFlow<Float> = _witYaw.asStateFlow()
 
     // Calibration points (using Y axis as primary for rudder position)
     private val _calibZero = MutableStateFlow(prefs.getInt(KEY_CALIB_ZERO, 0))
@@ -160,14 +170,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     // GPS State
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(application)
     
+    private val _gpsFix = MutableStateFlow(false)
+    val gpsFix: StateFlow<Boolean> = _gpsFix.asStateFlow()
+
     private val _gpsSpeedKnots = MutableStateFlow(0.0f)
     val gpsSpeedKnots: StateFlow<Float> = _gpsSpeedKnots.asStateFlow()
 
     private val _gpsCourse = MutableStateFlow<Int?>(null)
     val gpsCourse: StateFlow<Int?> = _gpsCourse.asStateFlow()
-
-    private val _gpsFix = MutableStateFlow(false)
-    val gpsFix: StateFlow<Boolean> = _gpsFix.asStateFlow()
 
     private var throttleJob: Job? = null
     private var statusQueryJob: Job? = null
@@ -182,10 +192,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         setupRemote()
         setupConnectionVoice()
         setupMagnetometer()
+        setupWitMotion()
         
         // Initial setup for managers from persisted values
-        bleManager.setRawDataEnabled(_showRawData.value)
-        bleManager.setLoggingEnabled(_enableLogging.value)
+        motorManager.setRawDataEnabled(_showRawData.value)
+        motorManager.setLoggingEnabled(_enableLogging.value)
+        imuManager.setRawDataEnabled(_showRawData.value)
+        imuManager.setLoggingEnabled(_enableLogging.value)
 
         // Auto-reconnect to remote if we have a saved MAC
         prefs.getString(KEY_REMOTE_MAC, null)?.let { mac ->
@@ -293,10 +306,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     private fun setupConnectionVoice() {
         viewModelScope.launch {
-            connectionState.drop(1).collect { state ->
+            motorConnectionState.drop(1).collect { state ->
                 when (state) {
                     TorqeedoBleManager.ConnectionState.CONNECTED -> speak("Motor connected")
                     TorqeedoBleManager.ConnectionState.DISCONNECTED -> speak("Motor disconnected")
+                    else -> {}
+                }
+            }
+        }
+        viewModelScope.launch {
+            imuConnectionState.drop(1).collect { state ->
+                when (state) {
+                    TorqeedoBleManager.ConnectionState.CONNECTED -> speak("Heading sensor connected")
+                    TorqeedoBleManager.ConnectionState.DISCONNECTED -> speak("Heading sensor disconnected")
                     else -> {}
                 }
             }
@@ -305,30 +327,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     private fun setupMagnetometer() {
         viewModelScope.launch {
-            bleManager.magnetometerData.collect { bytes ->
+            motorManager.magnetometerData.collect { bytes ->
                 if (bytes.size >= 8) {
                     // MMC5603 20-bit data unpacking
-                    // Byte 0: X[19:12], Byte 1: X[11:4], Byte 2: Y[19:12], Byte 3: Y[11:4]
-                    // Byte 4: Z[19:12], Byte 5: Z[11:4]
-                    val xUnsigned =
-                        ((bytes[0].toInt() and 0xFF) shl 12) or
-                                ((bytes[1].toInt() and 0xFF) shl 4) or
-                                (bytes[6].toInt() and 0x0F)
-
-                    val yUnsigned =
-                        ((bytes[2].toInt() and 0xFF) shl 12) or
-                                ((bytes[3].toInt() and 0xFF) shl 4) or
-                                (bytes[7].toInt() and 0x0F)
-
-                    val zUnsigned =
-                        ((bytes[4].toInt() and 0xFF) shl 12) or
-                                ((bytes[5].toInt() and 0xFF) shl 4) or
-                                (bytes[8].toInt() and 0x0F)
-
-                    // Convert unsigned centered-at-524288 format to signed
+                    val xUnsigned = ((bytes[0].toInt() and 0xFF) shl 12) or ((bytes[1].toInt() and 0xFF) shl 4) or (bytes[6].toInt() and 0x0F)
+                    val yUnsigned = ((bytes[2].toInt() and 0xFF) shl 12) or ((bytes[3].toInt() and 0xFF) shl 4) or (bytes[7].toInt() and 0x0F)
+                    val zUnsigned = ((bytes[4].toInt() and 0xFF) shl 12) or ((bytes[5].toInt() and 0xFF) shl 4) or (bytes[8].toInt() and 0x0F)
                     _magX.value = xUnsigned - 524288
                     _magY.value = yUnsigned - 524288
                     _magZ.value = zUnsigned - 524288
+                }
+            }
+        }
+    }
+
+    private fun setupWitMotion() {
+        viewModelScope.launch {
+            imuManager.witMotionData.collect { frame ->
+                if (frame.size < 11) return@collect
+                val type = frame[1].toInt() and 0xFF
+                when (type) {
+                    0x53 -> { // Angle: Roll, Pitch, Yaw
+                        val rollRaw  = ((frame[3].toInt() shl 8) or (frame[2].toInt() and 0xFF)).toShort()
+                        val pitchRaw = ((frame[5].toInt() shl 8) or (frame[4].toInt() and 0xFF)).toShort()
+                        val yawRaw   = ((frame[7].toInt() shl 8) or (frame[6].toInt() and 0xFF)).toShort()
+                        
+                        _witRoll.value  = rollRaw  / 32768f * 180f
+                        _witPitch.value = pitchRaw / 32768f * 180f
+                        _witYaw.value   = yawRaw   / 32768f * 180f
+                    }
                 }
             }
         }
@@ -339,27 +366,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         override fun onLocationResult(locationResult: LocationResult) {
             val location = locationResult.lastLocation ?: return
             _gpsFix.value = true
-            
-            // Speed in m/s to knots (1 m/s ≈ 1.94384 knots)
             val speedKnots = location.speed * 1.94384f
             _gpsSpeedKnots.value = speedKnots
-            
-            val course = if (location.hasBearing()) {
-                location.bearing.toInt()
-            } else {
-                null
-            }
+            val course = if (location.hasBearing()) location.bearing.toInt() else null
             _gpsCourse.value = course
-
-            // Update BLE manager with GPS info for logging
-            bleManager.updateGpsInfo(
-                location.latitude,
-                location.longitude,
-                speedKnots,
-                course
-            )
+            motorManager.updateGpsInfo(location.latitude, location.longitude, speedKnots, course)
         }
-
         override fun onLocationAvailability(availability: LocationAvailability) {
             _gpsFix.value = availability.isLocationAvailable
         }
@@ -375,7 +387,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     fun stopGpsUpdates() {
         fusedLocationClient.removeLocationUpdates(locationCallback)
-        bleManager.updateGpsInfo(null, null, null, null)
+        motorManager.updateGpsInfo(null, null, null, null)
         _gpsFix.value = false
     }
 
@@ -386,18 +398,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     fun startScan() = scanner.startScan(_scanAllNames.value)
     fun startRemoteScan() = scanner.startRemoteScan()
+    fun startImuScan() = scanner.startImuScan()
     fun stopScan()  = scanner.stopScan()
 
     // ── Debug ─────────────────────────────────────────────────────────────
     fun setShowRawData(show: Boolean) {
         _showRawData.value = show
-        bleManager.setRawDataEnabled(show)
+        motorManager.setRawDataEnabled(show)
+        imuManager.setRawDataEnabled(show)
         prefs.edit().putBoolean(KEY_SHOW_RAW, show).apply()
     }
 
     fun setEnableLogging(enabled: Boolean) {
         _enableLogging.value = enabled
-        bleManager.setLoggingEnabled(enabled)
+        motorManager.setLoggingEnabled(enabled)
+        imuManager.setLoggingEnabled(enabled)
         prefs.edit().putBoolean(KEY_LOGGING, enabled).apply()
     }
 
@@ -438,12 +453,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         scanner.stopScan()
         viewModelScope.launch {
             try {
-                if (device.name.contains("LOOKBON", ignoreCase = true)) {
-                    remote.connectToDevice(device.device, autoReconnect = true)
-                } else {
-                    bleManager.connectToDevice(device.device)
-                    startLoops()
-                    startGpsUpdates()
+                when {
+                    device.name.contains("LOOKBON", ignoreCase = true) -> {
+                        remote.connectToDevice(device.device, autoReconnect = true)
+                    }
+                    device.name.contains("IMU", ignoreCase = true) -> {
+                        imuManager.connectToDevice(device.device)
+                    }
+                    else -> {
+                        motorManager.connectToDevice(device.device)
+                        startLoops()
+                        startGpsUpdates()
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to connect to ${device.name}", e)
@@ -454,11 +475,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     fun disconnect() {
         stopLoops()
         stopGpsUpdates()
-        bleManager.disconnectDevice()
+        motorManager.disconnectDevice()
+        imuManager.disconnectDevice()
     }
     
     fun disconnectRemote() {
-        prefs.edit().remove(KEY_REMOTE_MAC).apply() // Forget remote if explicitly disconnected
+        prefs.edit().remove(KEY_REMOTE_MAC).apply()
         remote.disconnect().enqueue()
     }
 
@@ -536,7 +558,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         if (actualDelta != 0) {
             _steerValue.value = newValue
             val runtimeMs = abs(actualDelta) * _steerScale.value
-            bleManager.sendSteer(actualDelta, runtimeMs)
+            motorManager.sendSteer(actualDelta, runtimeMs)
         }
     }
 
@@ -601,8 +623,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         throttleJob?.cancel()
         throttleJob = viewModelScope.launch {
             while (true) {
-                if (connectionState.value == TorqeedoBleManager.ConnectionState.CONNECTED) {
-                    bleManager.sendDrive(currentSpeed.value)
+                if (motorConnectionState.value == TorqeedoBleManager.ConnectionState.CONNECTED) {
+                    motorManager.sendDrive(currentSpeed.value)
                 }
                 delay(_throttleDelay.value)
             }
@@ -612,17 +634,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private fun stopThrottleLoop() {
         throttleJob?.cancel()
         throttleJob = null
-        bleManager.sendDrive(0)
+        motorManager.sendDrive(0)
     }
 
     private fun startStatusQueryLoop() {
         statusQueryJob?.cancel()
         statusQueryJob = viewModelScope.launch {
             while (true) {
-                if (connectionState.value == TorqeedoBleManager.ConnectionState.CONNECTED) {
-                    bleManager.sendStatusQuery()
-                    // Alternating status query for steering motor if needed?
-                    // For now just querying motor.
+                if (motorConnectionState.value == TorqeedoBleManager.ConnectionState.CONNECTED) {
+                    motorManager.sendStatusQuery()
                 }
                 delay(STATUS_QUERY_DELAY)
             }
@@ -638,8 +658,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         sensorReadJob?.cancel()
         sensorReadJob = viewModelScope.launch {
             while (true) {
-                if (connectionState.value == TorqeedoBleManager.ConnectionState.CONNECTED) {
-                    bleManager.readCurrentSensor()
+                if (motorConnectionState.value == TorqeedoBleManager.ConnectionState.CONNECTED) {
+                    motorManager.readCurrentSensor()
                 }
                 delay(SENSOR_READ_DELAY)
             }
@@ -655,7 +675,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         super.onCleared()
         stopLoops()
         stopGpsUpdates()
-        bleManager.disconnectDevice()
+        motorManager.disconnectDevice()
+        imuManager.disconnectDevice()
         remote.disconnect().enqueue()
         tts?.shutdown()
         tts = null

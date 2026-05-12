@@ -38,6 +38,7 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         val CHAR_AE03_UUID: UUID  = UUID.fromString("0000ae03-0000-1000-8000-00805f9b34fb")
 
         private const val SENSOR_HEADER: Byte = 0xA5.toByte()
+        private const val WIT_HEADER: Byte = 0x55.toByte()
     }
 
     private var ae10Char: BluetoothGattCharacteristic? = null
@@ -115,6 +116,7 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
+    private val telemetryAccumulator = TorqeedoProtocol.TelemetryAccumulator()
     private val _statusFlow = MutableSharedFlow<TorqeedoProtocol.MotorStatus>(replay = 1)
     val statusFlow: SharedFlow<TorqeedoProtocol.MotorStatus> = _statusFlow.asSharedFlow()
 
@@ -123,6 +125,9 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
 
     private val _magnetometerData = MutableSharedFlow<ByteArray>(replay = 1)
     val magnetometerData: SharedFlow<ByteArray> = _magnetometerData.asSharedFlow()
+
+    private val _witMotionData = MutableSharedFlow<ByteArray>(replay = 1)
+    val witMotionData: SharedFlow<ByteArray> = _witMotionData.asSharedFlow()
 
     private val _rawStatusFlow = MutableSharedFlow<ByteArray>(replay = 1)
     val rawStatusFlow: SharedFlow<ByteArray> = _rawStatusFlow.asSharedFlow()
@@ -171,18 +176,15 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
 
     /**
      * Improved framing logic based on user logs.
-     * Handles both TQ Bus frames (0xAC) and MMC5603 sensor frames (0xA5).
+     * Handles TQ Bus frames (0xAC), MMC5603 sensor frames (0xA5), and WitMotion (0x55).
      */
     private fun processBuffer() {
         while (rxBuffer.isNotEmpty()) {
             val idxAC = rxBuffer.indexOf(TorqeedoProtocol.HEADER)
             val idxA5 = rxBuffer.indexOf(SENSOR_HEADER)
+            val idx55 = rxBuffer.indexOf(WIT_HEADER)
 
-            val startIdx = when {
-                idxAC == -1 -> idxA5
-                idxA5 == -1 -> idxAC
-                else -> minOf(idxAC, idxA5)
-            }
+            val startIdx = listOf(idxAC, idxA5, idx55).filter { it != -1 }.minOrNull() ?: -1
 
             if (startIdx == -1) {
                 if (rxBuffer.size > 1024) rxBuffer.clear()
@@ -192,58 +194,75 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                 repeat(startIdx) { rxBuffer.removeAt(0) }
             }
 
-            // Now rxBuffer[0] is either 0xAC or 0xA5
+            // Now rxBuffer[0] is either 0xAC, 0xA5 or 0x55
             val header = rxBuffer[0]
 
-            if (header == SENSOR_HEADER) {
-                // Sensor packet is 11 bytes: [0xA5, SEQ, DATA x 9]
-                if (rxBuffer.size >= 11) {
-                    val frame = rxBuffer.take(11).toByteArray()
-                    repeat(11) { rxBuffer.removeAt(0) }
+            when (header) {
+                SENSOR_HEADER -> {
+                    // Sensor packet is 11 bytes: [0xA5, SEQ, DATA x 9]
+                    if (rxBuffer.size >= 11) {
+                        val frame = rxBuffer.take(11).toByteArray()
+                        repeat(11) { rxBuffer.removeAt(0) }
 
-                    val rawMagData = frame.copyOfRange(2, 11)
-                    _magnetometerData.tryEmit(rawMagData)
+                        val rawMagData = frame.copyOfRange(2, 11)
+                        _magnetometerData.tryEmit(rawMagData)
+
+                        if (isRawDataEnabled) {
+                            logToFile("RECV_MAG", frame)
+                            _rawStatusFlow.tryEmit(frame)
+                        }
+                    } else {
+                        return
+                    }
+                }
+                WIT_HEADER -> {
+                    // WitMotion packet is 11 bytes: [0x55, TYPE, DATA x 8, SUM]
+                    if (rxBuffer.size >= 11) {
+                        val frame = rxBuffer.take(11).toByteArray()
+                        repeat(11) { rxBuffer.removeAt(0) }
+                        
+                        _witMotionData.tryEmit(frame)
+
+                        if (isRawDataEnabled) {
+                            logToFile("RECV_WIT", frame)
+                            _rawStatusFlow.tryEmit(frame)
+                        }
+                    } else {
+                        return
+                    }
+                }
+                else -> {
+                    // TQ Bus logic (0xAC)
+                    // Look for the NEXT header or a footer
+                    var frameEndIdx = -1
+                    for (i in 1 until rxBuffer.size) {
+                        if (rxBuffer[i] == TorqeedoProtocol.HEADER ||
+                            rxBuffer[i] == TorqeedoProtocol.FOOTER ||
+                            rxBuffer[i] == SENSOR_HEADER ||
+                            rxBuffer[i] == WIT_HEADER) {
+                            frameEndIdx = i
+                            break
+                        }
+                    }
+
+                    if (frameEndIdx == -1) {
+                        if (rxBuffer.size > 256) rxBuffer.removeAt(0)
+                        return
+                    }
+
+                    val frameLength = if (rxBuffer[frameEndIdx] == TorqeedoProtocol.FOOTER) frameEndIdx + 1 else frameEndIdx
+                    val frame = rxBuffer.take(frameLength).toByteArray()
+                    repeat(frameLength) { rxBuffer.removeAt(0) }
 
                     if (isRawDataEnabled) {
-                        logToFile("RECV_MAG", frame)
+                        logToFile("FRAME", frame)
                         _rawStatusFlow.tryEmit(frame)
                     }
-                } else {
-                    // Incomplete sensor packet
-                    return
-                }
-            } else {
-                // TQ Bus logic (0xAC)
-                // Look for the NEXT header or a footer
-                var frameEndIdx = -1
-                for (i in 1 until rxBuffer.size) {
-                    if (rxBuffer[i] == TorqeedoProtocol.HEADER ||
-                        rxBuffer[i] == TorqeedoProtocol.FOOTER ||
-                        rxBuffer[i] == SENSOR_HEADER) {
-                        frameEndIdx = i
-                        break
+
+                    telemetryAccumulator.update(frame)
+                    telemetryAccumulator.build()?.let { status ->
+                        _statusFlow.tryEmit(status)
                     }
-                }
-
-                if (frameEndIdx == -1) {
-                    // No delimiter found yet. If buffer is too big, discard.
-                    if (rxBuffer.size > 256) rxBuffer.removeAt(0)
-                    return
-                }
-
-                // Include the footer if that's what we found
-                val frameLength = if (rxBuffer[frameEndIdx] == TorqeedoProtocol.FOOTER) frameEndIdx + 1 else frameEndIdx
-
-                val frame = rxBuffer.take(frameLength).toByteArray()
-                repeat(frameLength) { rxBuffer.removeAt(0) }
-
-                if (isRawDataEnabled) {
-                    logToFile("FRAME", frame)
-                    _rawStatusFlow.tryEmit(frame)
-                }
-
-                TorqeedoProtocol.parseStatus(frame)?.let { status ->
-                    _statusFlow.tryEmit(status)
                 }
             }
         }
@@ -259,6 +278,7 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                 }
             }
             rxBuffer.clear()
+            telemetryAccumulator.clear()
             connect(device).retry(3, 300).timeout(10_000).suspend()
             _connectionState.value = ConnectionState.CONNECTED
         } catch (e: Exception) {

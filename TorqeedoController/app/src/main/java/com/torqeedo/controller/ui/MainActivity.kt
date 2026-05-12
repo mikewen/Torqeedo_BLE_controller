@@ -220,28 +220,32 @@ class MainActivity : AppCompatActivity() {
         binding.btnScanRemote.setOnClickListener {
             if (vm.isScanning.value) vm.stopScan() else vm.startRemoteScan()
         }
+
+        binding.btnScanImu.setOnClickListener {
+            if (vm.isScanning.value) vm.stopScan() else vm.startImuScan()
+        }
     }
 
     private fun observeState() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
-                    vm.connectionState.collectLatest { state ->
+                    vm.motorConnectionState.collectLatest { state ->
                         when (state) {
                             TorqeedoBleManager.ConnectionState.DISCONNECTED -> {
-                                binding.tvConnectionStatus.text = "Motor: Off"
+                                binding.tvConnectionStatus.text = "Mot: Off"
                                 binding.tvConnectionStatus.setTextColor(
                                     ContextCompat.getColor(this@MainActivity, R.color.status_disconnected))
                                 binding.controlPanel.visibility = View.GONE
                                 binding.scanPanel.visibility    = View.VISIBLE
                             }
                             TorqeedoBleManager.ConnectionState.CONNECTING -> {
-                                binding.tvConnectionStatus.text = "Motor: …"
+                                binding.tvConnectionStatus.text = "Mot: …"
                                 binding.tvConnectionStatus.setTextColor(
                                     ContextCompat.getColor(this@MainActivity, R.color.status_connecting))
                             }
                             TorqeedoBleManager.ConnectionState.CONNECTED -> {
-                                binding.tvConnectionStatus.text = "Motor: On"
+                                binding.tvConnectionStatus.text = "Mot: On"
                                 binding.tvConnectionStatus.setTextColor(
                                     ContextCompat.getColor(this@MainActivity, R.color.status_connected))
                                 binding.scanPanel.visibility    = View.GONE
@@ -252,8 +256,22 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 launch {
+                    vm.imuConnectionState.collectLatest { state ->
+                        binding.tvImuStatus.text = when(state) {
+                            TorqeedoBleManager.ConnectionState.CONNECTED -> "Hdg: On"
+                            TorqeedoBleManager.ConnectionState.CONNECTING -> "Hdg: …"
+                            else -> "Hdg: Off"
+                        }
+                        binding.tvImuStatus.setTextColor(ContextCompat.getColor(this@MainActivity,
+                            if (state == TorqeedoBleManager.ConnectionState.CONNECTED) R.color.status_connected else R.color.text_secondary))
+                        
+                        binding.witMotionCard.visibility = if (state == TorqeedoBleManager.ConnectionState.CONNECTED) View.VISIBLE else View.GONE
+                    }
+                }
+
+                launch {
                     vm.remoteConnected.collectLatest { connected ->
-                        binding.tvRemoteStatus.text = if (connected) "Remote: On" else "Remote: Off"
+                        binding.tvRemoteStatus.text = if (connected) "Rem: On" else "Rem: Off"
                         binding.tvRemoteStatus.setTextColor(ContextCompat.getColor(this@MainActivity,
                             if (connected) R.color.status_connected else R.color.text_secondary))
                     }
@@ -271,6 +289,7 @@ class MainActivity : AppCompatActivity() {
                     vm.isScanning.collectLatest { scanning ->
                         binding.btnScan.text = if (scanning) "Stop Scan" else "Scan for Motor"
                         binding.btnScanRemote.text = if (scanning) "Stop Scan" else "Scan for Remote"
+                        binding.btnScanImu.text = if (scanning) "Stop Scan" else "Scan for Heading"
                         binding.scanProgress.visibility = if (scanning) View.VISIBLE else View.GONE
                         binding.switchScanAll.isEnabled = !scanning
                     }
@@ -307,6 +326,18 @@ class MainActivity : AppCompatActivity() {
                             binding.etSteerScale.setText(scale.toString())
                         }
                         binding.seekBarSteerScale.progress = scale.coerceAtMost(binding.seekBarSteerScale.max)
+                    }
+                }
+
+                // Motor Data Observation
+                launch {
+                    vm.motorStatus.collectLatest { status ->
+                        if (status != null) {
+                            binding.tvMotorSoc.text = if (status.voltage > 20f) "%.0f%%".format((status.voltage - 42f) / (52.5f - 42f) * 100f).coerceIn("0%","100%") else "—" // Rough Li-ion estimate if applicable
+                            binding.tvMotorWatts.text = status.powerW.toString()
+                            binding.tvMotorVolts.text = "%.1fV".format(status.voltage)
+                            binding.tvMotorRpm.text = status.rpm.toString()
+                        }
                     }
                 }
 
@@ -360,6 +391,17 @@ class MainActivity : AppCompatActivity() {
                     vm.rudderPosition.collectLatest { pos ->
                         binding.tvRudderPos.text = "Rudder: %.1f%%".format(pos)
                     }
+                }
+
+                // IMU Observation
+                launch {
+                    vm.witYaw.collectLatest { yaw -> binding.tvYaw.text = "%.1f°".format(yaw) }
+                }
+                launch {
+                    vm.witPitch.collectLatest { pitch -> binding.tvPitch.text = "%.1f°".format(pitch) }
+                }
+                launch {
+                    vm.witRoll.collectLatest { roll -> binding.tvRoll.text = "%.1f°".format(roll) }
                 }
 
                 launch {
