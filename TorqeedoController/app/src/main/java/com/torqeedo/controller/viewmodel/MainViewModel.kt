@@ -57,7 +57,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         const val STEER_MAX = 50
         private const val DEFAULT_STEER_SCALE = 10
 
-        private const val AUTOPILOT_DELAY = 500L         // 2 Hz autopilot loop
+        private const val AUTOPILOT_DELAY = 200L         // 5 Hz autopilot loop
+        private const val KEY_AP_KP = "ap_kp"
+        private const val KEY_AP_KI = "ap_ki"
+        private const val KEY_AP_KD = "ap_kd"
+        
+        private const val DEFAULT_AP_KP = 2.5f
+        private const val DEFAULT_AP_KI = 0.1f
+        private const val DEFAULT_AP_KD = 1.0f
+        private const val AUTOPILOT_MAX_I = 20f          // Max integral contribution
     }
 
     private val prefs: SharedPreferences = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -213,6 +221,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     private val _targetHeading = MutableStateFlow(0f)
     val targetHeading: StateFlow<Float> = _targetHeading.asStateFlow()
+
+    // PID Gains
+    private val _apKp = MutableStateFlow(prefs.getFloat(KEY_AP_KP, DEFAULT_AP_KP))
+    val apKp: StateFlow<Float> = _apKp.asStateFlow()
+
+    private val _apKi = MutableStateFlow(prefs.getFloat(KEY_AP_KI, DEFAULT_AP_KI))
+    val apKi: StateFlow<Float> = _apKi.asStateFlow()
+
+    private val _apKd = MutableStateFlow(prefs.getFloat(KEY_AP_KD, DEFAULT_AP_KD))
+    val apKd: StateFlow<Float> = _apKd.asStateFlow()
+
+    private var autopilotLastError = 0f
+    private var autopilotIntegral = 0f
 
     private var throttleJob: Job? = null
     private var statusQueryJob: Job? = null
@@ -736,9 +757,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         setTargetHeading(_targetHeading.value + delta)
     }
 
+    fun setApKp(value: Float) {
+        _apKp.value = value
+        prefs.edit().putFloat(KEY_AP_KP, value).apply()
+    }
+
+    fun setApKi(value: Float) {
+        _apKi.value = value
+        prefs.edit().putFloat(KEY_AP_KI, value).apply()
+    }
+
+    fun setApKd(value: Float) {
+        _apKd.value = value
+        prefs.edit().putFloat(KEY_AP_KD, value).apply()
+    }
+
     private fun startAutoPilotLoop() {
         autoPilotJob?.cancel()
+        autopilotLastError = 0f
+        autopilotIntegral = 0f
+
         autoPilotJob = viewModelScope.launch {
+            val dt = AUTOPILOT_DELAY / 1000f // Loop period in seconds
             while (true) {
                 val current = trueHeading.value
                 val target = _targetHeading.value
@@ -747,9 +787,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 while (error > 180f) error -= 360f
                 while (error < -180f) error += 360f
                 
-                // Simple Bang-bang or P-controller for steering
-                if (abs(error) > 1.0f) {
-                    val steerDelta = if (error > 0) 1 else -1
+                // PID Calculation
+                val p = _apKp.value * error
+                
+                autopilotIntegral += error * dt
+                autopilotIntegral = autopilotIntegral.coerceIn(-AUTOPILOT_MAX_I, AUTOPILOT_MAX_I) // Anti-windup
+                val i = _apKi.value * autopilotIntegral
+                
+                val d = _apKd.value * (error - autopilotLastError) / dt
+                autopilotLastError = error
+                
+                // Output is desired rudder position (-100 to 100)
+                val desiredRudder = (p + i + d).coerceIn(-100f, 100f)
+                
+                // Inner loop: Move actual rudder toward desiredRudder
+                val currentRudder = rudderPosition.value
+                val rudderError = desiredRudder - currentRudder
+                
+                // If there's a significant difference, issue a steer command
+                if (abs(rudderError) > 5f) {
+                    val steerDelta = if (rudderError > 0) 1 else -1
                     adjustSteer(steerDelta)
                 }
                 

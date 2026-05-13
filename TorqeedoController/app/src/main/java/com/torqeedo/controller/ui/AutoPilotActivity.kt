@@ -1,9 +1,12 @@
 package com.torqeedo.controller.ui
 
 import android.os.Bundle
+import android.view.inputmethod.EditorInfo
+import android.widget.SeekBar
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -40,6 +43,75 @@ class AutoPilotActivity : AppCompatActivity() {
         binding.btnToggleAutoPilot.setOnClickListener {
             vm.setAutoPilotActive(!vm.autoPilotActive.value)
         }
+
+        // PID Tuning - Kp
+        binding.sbKp.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) vm.setApKp(progress / 10f)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+        binding.etKp.setOnEditorActionListener { v, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                val value = v.text.toString().toFloatOrNull() ?: 0f
+                vm.setApKp(value.coerceIn(0f, 100f))
+                v.clearFocus()
+                true
+            } else false
+        }
+        binding.etKp.doAfterTextChanged { s ->
+            if (binding.etKp.hasFocus()) {
+                val value = s.toString().toFloatOrNull() ?: 0f
+                vm.setApKp(value)
+            }
+        }
+
+        // PID Tuning - Ki
+        binding.sbKi.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) vm.setApKi(progress / 100f)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+        binding.etKi.setOnEditorActionListener { v, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                val value = v.text.toString().toFloatOrNull() ?: 0f
+                vm.setApKi(value.coerceIn(0f, 10f))
+                v.clearFocus()
+                true
+            } else false
+        }
+        binding.etKi.doAfterTextChanged { s ->
+            if (binding.etKi.hasFocus()) {
+                val value = s.toString().toFloatOrNull() ?: 0f
+                vm.setApKi(value)
+            }
+        }
+
+        // PID Tuning - Kd
+        binding.sbKd.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) vm.setApKd(progress / 10f)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+        binding.etKd.setOnEditorActionListener { v, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                val value = v.text.toString().toFloatOrNull() ?: 0f
+                vm.setApKd(value.coerceIn(0f, 100f))
+                v.clearFocus()
+                true
+            } else false
+        }
+        binding.etKd.doAfterTextChanged { s ->
+            if (binding.etKd.hasFocus()) {
+                val value = s.toString().toFloatOrNull() ?: 0f
+                vm.setApKd(value)
+            }
+        }
     }
 
     private fun observeState() {
@@ -74,6 +146,27 @@ class AutoPilotActivity : AppCompatActivity() {
                 launch {
                     vm.speedMagnitude.collectLatest { speed ->
                         binding.tvSpeed.text = "${speed / 10}%"
+                    }
+                }
+
+                launch {
+                    vm.apKp.collectLatest { kp ->
+                        if (!binding.etKp.hasFocus()) binding.etKp.setText("%.1f".format(kp))
+                        binding.sbKp.progress = (kp * 10).toInt()
+                    }
+                }
+
+                launch {
+                    vm.apKi.collectLatest { ki ->
+                        if (!binding.etKi.hasFocus()) binding.etKi.setText("%.2f".format(ki))
+                        binding.sbKi.progress = (ki * 100).toInt()
+                    }
+                }
+
+                launch {
+                    vm.apKd.collectLatest { kd ->
+                        if (!binding.etKd.hasFocus()) binding.etKd.setText("%.1f".format(kd))
+                        binding.sbKd.progress = (kd * 10).toInt()
                     }
                 }
             }
