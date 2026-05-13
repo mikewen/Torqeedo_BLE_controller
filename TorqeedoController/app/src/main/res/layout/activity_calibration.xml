@@ -137,7 +137,7 @@
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
-            <!-- Heading Sensor Calibration (Placeholder for now) -->
+            <!-- Heading Sensor Calibration -->
             <androidx.cardview.widget.CardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -198,13 +198,46 @@
                         </LinearLayout>
                     </LinearLayout>
 
-                    <!-- WitMotion Calibration Button -->
-                    <Button
-                        android:id="@+id/btnCalibImu"
-                        style="@style/Widget.TorqeedoController.Button.Secondary"
+                    <TextView
+                        android:id="@+id/tvImuStatus"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Calibrate IMU (Start)" />
+                        android:text="Status: Idle"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="14sp"
+                        android:gravity="center"
+                        android:layout_marginBottom="16dp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="8dp">
+
+                        <Button
+                            android:id="@+id/btnCalibGyro"
+                            style="@style/Widget.TorqeedoController.Button.Secondary"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Calib Gyro"
+                            android:layout_marginEnd="4dp" />
+
+                        <Button
+                            android:id="@+id/btnCalibMag"
+                            style="@style/Widget.TorqeedoController.Button.Secondary"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Calib Mag" />
+                    </LinearLayout>
+
+                    <Button
+                        android:id="@+id/btnSaveImu"
+                        style="@style/Widget.TorqeedoController.Button.Primary"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Save \u0026 Finish" />
 
                 </LinearLayout>
             </androidx.cardview.widget.CardView>

@@ -43,10 +43,20 @@ class CalibrationActivity : AppCompatActivity() {
             vm.calibrateStbd()
             showSnack("Starboard max position calibrated")
         }
-        
-        binding.btnCalibImu.setOnClickListener {
-            // Placeholder for IMU calibration command if available in VM
-            showSnack("IMU Calibration started")
+
+        binding.btnCalibGyro.setOnClickListener {
+            vm.startImuGyroCalibration()
+            showSnack("Gyro calibration started")
+        }
+
+        binding.btnCalibMag.setOnClickListener {
+            vm.startImuMagCalibration()
+            showSnack("Magnetic calibration started")
+        }
+
+        binding.btnSaveImu.setOnClickListener {
+            vm.saveImuCalibration()
+            showSnack("Calibration saved")
         }
     }
 
@@ -75,6 +85,11 @@ class CalibrationActivity : AppCompatActivity() {
                 }
                 launch {
                     vm.witRoll.collectLatest { roll -> binding.tvRoll.text = "%.1f°".format(roll) }
+                }
+                launch {
+                    vm.imuCalibStatus.collectLatest { status ->
+                        binding.tvImuStatus.text = "Status: $status"
+                    }
                 }
             }
         }

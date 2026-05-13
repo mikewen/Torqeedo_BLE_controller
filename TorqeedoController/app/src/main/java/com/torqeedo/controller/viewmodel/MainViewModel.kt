@@ -131,7 +131,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private val _steerValue = MutableStateFlow(0)
     val steerValue: StateFlow<Int> = _steerValue.asStateFlow()
 
-    // Magnetometer / Rudder Position
+    // Magnetometer / Rudder Position (MMC5603 on motor)
     private val _magX = MutableStateFlow(0)
     val magX: StateFlow<Int> = _magX.asStateFlow()
     private val _magY = MutableStateFlow(0)
@@ -146,6 +146,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     val witPitch: StateFlow<Float> = _witPitch.asStateFlow()
     private val _witYaw = MutableStateFlow(0f)
     val witYaw: StateFlow<Float> = _witYaw.asStateFlow()
+
+    // WitMotion IMU Magnetometer
+    private val _witMagX = MutableStateFlow(0)
+    val witMagX: StateFlow<Int> = _witMagX.asStateFlow()
+    private val _witMagY = MutableStateFlow(0)
+    val witMagY: StateFlow<Int> = _witMagY.asStateFlow()
+    private val _witMagZ = MutableStateFlow(0)
+    val witMagZ: StateFlow<Int> = _witMagZ.asStateFlow()
 
     private val _declination = MutableStateFlow(prefs.getFloat(KEY_DECLINATION, 0f))
     val declination: StateFlow<Float> = _declination.asStateFlow()
@@ -180,6 +188,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
         pos.coerceIn(-100f, 100f)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
+
+    // IMU Calibration State
+    private val _imuCalibStatus = MutableStateFlow("Idle")
+    val imuCalibStatus: StateFlow<String> = _imuCalibStatus.asStateFlow()
 
     // GPS State
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(application)
@@ -364,7 +376,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             imuManager.witMotionData.collect { frame ->
                 if (frame.size < 2) return@collect
                 val type = frame[1].toInt() and 0xFF
-                Log.d(TAG, "RECV WIT frame type: 0x%02X, size: %d".format(type, frame.size))
                 
                 when (type) {
                     0x53 -> { // Angle: Roll, Pitch, Yaw (11-byte frame)
@@ -375,7 +386,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                         
                         _witRoll.value  = rollRaw  / 32768f * 180f
                         _witPitch.value = pitchRaw / 32768f * 180f
-                        _witYaw.value   = yawRaw   / 32768f * 180f
+                        
+                        // Invert yaw so CW turn increases degrees, and normalize to 0-360
+                        var yaw = -(yawRaw / 32768f * 180f)
+                        while (yaw < 0) yaw += 360f
+                        while (yaw >= 360) yaw -= 360f
+                        _witYaw.value = yaw
+                    }
+                    0x54 -> { // Magnetometer: Hx, Hy, Hz (11-byte frame)
+                        if (frame.size < 11) return@collect
+                        val hx = ((frame[3].toInt() shl 8) or (frame[2].toInt() and 0xFF)).toShort().toInt()
+                        val hy = ((frame[5].toInt() shl 8) or (frame[4].toInt() and 0xFF)).toShort().toInt()
+                        val hz = ((frame[7].toInt() shl 8) or (frame[6].toInt() and 0xFF)).toShort().toInt()
+                        _witMagX.value = hx
+                        _witMagY.value = hy
+                        _witMagZ.value = hz
                     }
                     0x61 -> { // Combined BLE 5.0 Data (20-byte frame)
                         if (frame.size < 20) return@collect
@@ -386,7 +411,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                         
                         _witRoll.value  = rollRaw  / 32768f * 180f
                         _witPitch.value = pitchRaw / 32768f * 180f
-                        _witYaw.value   = yawRaw   / 32768f * 180f
+                        
+                        // Invert yaw so CW turn increases degrees, and normalize to 0-360
+                        var yaw = -(yawRaw / 32768f * 180f)
+                        while (yaw < 0) yaw += 360f
+                        while (yaw >= 360) yaw -= 360f
+                        _witYaw.value = yaw
                     }
                 }
             }
@@ -496,6 +526,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         _calibStbd.value = currentY
         prefs.edit().putInt(KEY_CALIB_STBD, currentY).apply()
         speak("Starboard max set")
+    }
+
+    fun startImuGyroCalibration() {
+        imuManager.sendWitCalibration(0x01) // Gyro/Accel
+        _imuCalibStatus.value = "Gyro Calibrating..."
+        speak("Gyro calibration started. Keep sensor level and still.")
+    }
+
+    fun startImuMagCalibration() {
+        imuManager.sendWitCalibration(0x02) // Magnetic
+        _imuCalibStatus.value = "Mag Calibrating..."
+        speak("Magnetic calibration started. Rotate sensor in all directions.")
+    }
+
+    fun saveImuCalibration() {
+        imuManager.sendWitCalibration(0x00) // Save/Exit
+        _imuCalibStatus.value = "Idle"
+        speak("Calibration saved")
     }
 
     // ── Connect / disconnect ──────────────────────────────────────────────

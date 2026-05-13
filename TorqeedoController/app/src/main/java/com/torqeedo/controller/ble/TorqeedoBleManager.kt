@@ -361,5 +361,19 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         }.enqueue()
     }
 
+    fun sendWitCalibration(type: Byte) {
+        val char = ae02Char ?: return
+        // WitMotion unlock command: FF AA 69 88 B5
+        val unlock = byteArrayOf(0xFF.toByte(), 0xAA.toByte(), 0x69.toByte(), 0x88.toByte(), 0xB5.toByte())
+        // WitMotion calibration command: FF AA 01 [type] 00
+        val calib = byteArrayOf(0xFF.toByte(), 0xAA.toByte(), 0x01.toByte(), type, 0x00.toByte())
+        
+        logToFile("SEND_WIT_UNLOCK", unlock)
+        writeCharacteristic(char, unlock, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE).enqueue()
+        
+        logToFile("SEND_WIT_CALIB", calib)
+        writeCharacteristic(char, calib, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE).enqueue()
+    }
+
     enum class ConnectionState { DISCONNECTED, CONNECTING, CONNECTED }
 }
