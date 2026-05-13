@@ -404,6 +404,12 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 launch {
+                    vm.trueHeading.collectLatest { heading ->
+                        binding.tvTrueHeading.text = "%.1f°".format(heading)
+                    }
+                }
+
+                launch {
                     vm.witYaw.collectLatest { yaw ->
                         binding.tvYaw.text = "%.1f°".format(yaw)
                     }

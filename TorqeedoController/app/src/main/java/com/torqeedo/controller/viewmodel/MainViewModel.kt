@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.SharedPreferences
+import android.hardware.GeomagneticField
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.util.Log
@@ -38,6 +39,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         private const val KEY_CALIB_ZERO = "calib_zero"
         private const val KEY_CALIB_PORT = "calib_port"
         private const val KEY_CALIB_STBD = "calib_stbd"
+
+        private const val KEY_DECLINATION = "declination"
 
         const val SPEED_MAX = 1000
         const val SPEED_MIN = 0
@@ -80,7 +83,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private val _enableVoicePrompts = MutableStateFlow(prefs.getBoolean(KEY_VOICE, true))
     val enableVoicePrompts: StateFlow<Boolean> = _enableVoicePrompts.asStateFlow()
 
-    private val _showMotorStatus = MutableStateFlow(prefs.getBoolean(KEY_SHOW_MOTOR_STATUS, true))
+    private val _showMotorStatus = MutableStateFlow(prefs.getBoolean(KEY_SHOW_MOTOR_STATUS, false))
     val showMotorStatus: StateFlow<Boolean> = _showMotorStatus.asStateFlow()
 
     private val _steerScale = MutableStateFlow(prefs.getInt(KEY_STEER_SCALE, DEFAULT_STEER_SCALE))
@@ -143,6 +146,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     val witPitch: StateFlow<Float> = _witPitch.asStateFlow()
     private val _witYaw = MutableStateFlow(0f)
     val witYaw: StateFlow<Float> = _witYaw.asStateFlow()
+
+    private val _declination = MutableStateFlow(prefs.getFloat(KEY_DECLINATION, 0f))
+    val declination: StateFlow<Float> = _declination.asStateFlow()
+
+    val trueHeading: StateFlow<Float> = combine(witYaw, _declination) { yaw, decl ->
+        var heading = yaw + decl
+        while (heading < 0) heading += 360f
+        while (heading >= 360) heading -= 360f
+        heading
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
 
     // Calibration points (using Y axis as primary for rudder position)
     private val _calibZero = MutableStateFlow(prefs.getInt(KEY_CALIB_ZERO, 0))
@@ -390,6 +403,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             val course = if (location.hasBearing()) location.bearing.toInt() else null
             _gpsCourse.value = course
             motorManager.updateGpsInfo(location.latitude, location.longitude, speedKnots, course)
+
+            // Update magnetic declination
+            val geomag = GeomagneticField(
+                location.latitude.toFloat(),
+                location.longitude.toFloat(),
+                location.altitude.toFloat(),
+                System.currentTimeMillis()
+            )
+            val decl = geomag.declination
+            if (abs(_declination.value - decl) > 0.1f) {
+                _declination.value = decl
+                prefs.edit().putFloat(KEY_DECLINATION, decl).apply()
+            }
         }
         override fun onLocationAvailability(availability: LocationAvailability) {
             _gpsFix.value = availability.isLocationAvailable
