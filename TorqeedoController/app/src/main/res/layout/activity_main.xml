@@ -131,7 +131,7 @@
             android:id="@+id/switchShowMotorStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:checked="true"
+            android:checked="false"
             app:switchMinWidth="32dp" />
     </LinearLayout>
 
@@ -497,6 +497,7 @@
 
             <!-- Main Control Card -->
             <androidx.cardview.widget.CardView
+                android:id="@+id/motorControlCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="8dp"
@@ -566,8 +567,7 @@
 
                             <TextView
                                 android:id="@+id/tvDirectionLabel"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
+                                android:layout_width="wrap_content" android:layout_height="wrap_content"
                                 android:text="FORWARD"
                                 android:textColor="@color/text_primary"
                                 android:textSize="14sp"
@@ -597,6 +597,7 @@
 
             <!-- Steering Controls Card -->
             <androidx.cardview.widget.CardView
+                android:id="@+id/steeringCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="8dp"
@@ -610,14 +611,31 @@
                     android:orientation="vertical"
                     android:padding="12dp">
 
-                    <TextView
-                        android:layout_width="wrap_content"
+                    <LinearLayout
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="STEERING"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="10sp"
-                        android:letterSpacing="0.1"
-                        android:layout_marginBottom="8dp" />
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="8dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="STEERING"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="10sp"
+                            android:letterSpacing="0.1" />
+
+                        <TextView
+                            android:id="@+id/tvSteerAngle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Steer Angle: —"
+                            android:textColor="@color/accent_primary"
+                            android:textSize="14sp"
+                            android:fontFamily="sans-serif-medium" />
+                    </LinearLayout>
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -714,97 +732,13 @@
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
-            <!-- Magnetometer/Rudder Calibration Card -->
-            <androidx.cardview.widget.CardView
+            <Button
+                android:id="@+id/btnCalibrate"
+                style="@style/Widget.TorqeedoController.Button.Secondary"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="8dp"
-                app:cardBackgroundColor="@color/bg_surface"
-                app:cardCornerRadius="12dp"
-                app:cardElevation="0dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="12dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="MMC5603 SENSOR / RUDDER POSITION"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="10sp"
-                        android:letterSpacing="0.1"
-                        android:layout_marginBottom="8dp" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:layout_marginBottom="8dp">
-
-                        <TextView android:id="@+id/tvMagX"
-                            android:layout_width="0dp" android:layout_height="wrap_content"
-                            android:layout_weight="1" android:text="X: 0"
-                            android:textColor="@color/text_primary" android:textSize="11sp" />
-                        <TextView android:id="@+id/tvMagY"
-                            android:layout_width="0dp" android:layout_height="wrap_content"
-                            android:layout_weight="1" android:text="Y: 0"
-                            android:textColor="@color/text_primary" android:textSize="11sp" />
-                        <TextView android:id="@+id/tvMagZ"
-                            android:layout_width="0dp" android:layout_height="wrap_content"
-                            android:layout_weight="1" android:text="Z: 0"
-                            android:textColor="@color/text_primary" android:textSize="11sp" />
-                    </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/tvRudderPos"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Rudder: Not Calibrated"
-                        android:textColor="@color/accent_primary"
-                        android:textSize="20sp"
-                        android:gravity="center"
-                        android:fontFamily="sans-serif-medium"
-                        android:layout_marginBottom="12dp" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal">
-
-                        <Button
-                            android:id="@+id/btnCalibPort"
-                            style="@style/Widget.TorqeedoController.Button.Secondary"
-                            android:layout_width="0dp"
-                            android:layout_height="40dp"
-                            android:layout_weight="1"
-                            android:text="Port Max"
-                            android:textSize="9sp"
-                            android:layout_marginEnd="4dp" />
-
-                        <Button
-                            android:id="@+id/btnCalibZero"
-                            style="@style/Widget.TorqeedoController.Button.Secondary"
-                            android:layout_width="0dp"
-                            android:layout_height="40dp"
-                            android:layout_weight="1"
-                            android:text="0"
-                            android:textSize="9sp"
-                            android:layout_marginEnd="4dp" />
-
-                        <Button
-                            android:id="@+id/btnCalibStbd"
-                            style="@style/Widget.TorqeedoController.Button.Secondary"
-                            android:layout_width="0dp"
-                            android:layout_height="40dp"
-                            android:layout_weight="1"
-                            android:text="Stbd Max"
-                            android:textSize="9sp" />
-                    </LinearLayout>
-                </LinearLayout>
-            </androidx.cardview.widget.CardView>
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:text="CALIBRATE SENSORS" />
 
             <Button
                 android:id="@+id/btnDisconnect"

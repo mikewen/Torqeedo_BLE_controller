@@ -23,19 +23,24 @@ import java.util.UUID
 import kotlin.math.abs
 
 /**
- * Nordic BleManager for the AC6328 BLE-UART bridge.
+ * Nordic BleManager for the AC6328 BLE-UART bridge or WitMotion sensors.
  */
 class TorqeedoBleManager(private val context: Context) : BleManager(context) {
 
     companion object {
         private const val TAG = "TorqeedoBle"
 
+        // Torqeedo / AC6328 UUIDs
         val SERVICE_AE30_UUID: UUID = UUID.fromString("0000ae30-0000-1000-8000-00805f9b34fb")
         val SERVICE_AE00_UUID: UUID = UUID.fromString("0000ae00-0000-1000-8000-00805f9b34fb")
         
         val CHAR_AE10_UUID: UUID  = UUID.fromString("0000ae10-0000-1000-8000-00805f9b34fb")
         val CHAR_AE02_UUID: UUID  = UUID.fromString("0000ae02-0000-1000-8000-00805f9b34fb")
         val CHAR_AE03_UUID: UUID  = UUID.fromString("0000ae03-0000-1000-8000-00805f9b34fb")
+
+        // WitMotion UUIDs
+        val SERVICE_WIT_UUID: UUID = UUID.fromString("0000ffe0-0000-1000-8000-00805f9b34fb")
+        val CHAR_WIT_UUID: UUID    = UUID.fromString("0000ffe1-0000-1000-8000-00805f9b34fb")
 
         private const val SENSOR_HEADER: Byte = 0xA5.toByte()
         private const val WIT_HEADER: Byte = 0x55.toByte()
@@ -140,17 +145,24 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
     private inner class GattCallback : BleManagerGattCallback() {
 
         override fun isRequiredServiceSupported(gatt: BluetoothGatt): Boolean {
-            val service = gatt.getService(SERVICE_AE30_UUID) 
-                ?: gatt.getService(SERVICE_AE00_UUID)
-                ?: run {
-                    Log.w(TAG, "Compatible Torqeedo service not found")
-                    return false
-                }
-
-            ae10Char = service.getCharacteristic(CHAR_AE10_UUID)
-            ae02Char = service.getCharacteristic(CHAR_AE02_UUID)
-            ae03Char = service.getCharacteristic(CHAR_AE03_UUID)
-            return ae10Char != null && ae02Char != null && ae03Char != null
+            val tqService = gatt.getService(SERVICE_AE30_UUID) ?: gatt.getService(SERVICE_AE00_UUID)
+            if (tqService != null) {
+                ae10Char = tqService.getCharacteristic(CHAR_AE10_UUID)
+                ae02Char = tqService.getCharacteristic(CHAR_AE02_UUID)
+                ae03Char = tqService.getCharacteristic(CHAR_AE03_UUID)
+                return ae10Char != null && ae02Char != null && ae03Char != null
+            }
+            
+            val witService = gatt.getService(SERVICE_WIT_UUID)
+            if (witService != null) {
+                ae02Char = witService.getCharacteristic(CHAR_WIT_UUID)
+                // Map other chars to the same characteristic for consistency
+                ae10Char = ae02Char 
+                ae03Char = ae02Char
+                return ae02Char != null
+            }
+            
+            return false
         }
 
         override fun initialize() {
@@ -174,10 +186,6 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         }
     }
 
-    /**
-     * Improved framing logic based on user logs.
-     * Handles TQ Bus frames (0xAC), MMC5603 sensor frames (0xA5), and WitMotion (0x55).
-     */
     private fun processBuffer() {
         while (rxBuffer.isNotEmpty()) {
             val idxAC = rxBuffer.indexOf(TorqeedoProtocol.HEADER)
@@ -216,24 +224,30 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                     }
                 }
                 WIT_HEADER -> {
-                    // WitMotion packet is 11 bytes: [0x55, TYPE, DATA x 8, SUM]
-                    if (rxBuffer.size >= 11) {
-                        val frame = rxBuffer.take(11).toByteArray()
-                        repeat(11) { rxBuffer.removeAt(0) }
+                    // WitMotion packet can be 11 bytes (serial) or 20 bytes (BLE 5.0)
+                    if (rxBuffer.size >= 2) {
+                        val type = rxBuffer[1].toInt() and 0xFF
+                        val len = if (type == 0x61) 20 else 11
                         
-                        _witMotionData.tryEmit(frame)
+                        if (rxBuffer.size >= len) {
+                            val frame = rxBuffer.take(len).toByteArray()
+                            repeat(len) { rxBuffer.removeAt(0) }
+                            
+                            _witMotionData.tryEmit(frame)
 
-                        if (isRawDataEnabled) {
-                            logToFile("RECV_WIT", frame)
-                            _rawStatusFlow.tryEmit(frame)
+                            if (isRawDataEnabled) {
+                                logToFile("RECV_WIT", frame)
+                                _rawStatusFlow.tryEmit(frame)
+                            }
+                        } else {
+                            return // Wait for more data
                         }
                     } else {
-                        return
+                        return // Wait for type byte
                     }
                 }
                 else -> {
                     // TQ Bus logic (0xAC)
-                    // Look for the NEXT header or a footer
                     var frameEndIdx = -1
                     for (i in 1 until rxBuffer.size) {
                         if (rxBuffer[i] == TorqeedoProtocol.HEADER ||
@@ -301,9 +315,8 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
     
     fun sendSteer(value: Int, runtimeMs: Int = 0) {
         val char = ae03Char ?: return
-        // Custom 5-byte command: [ 's', 'L'|'R', power, rtLo, rtHi ]
         val dir = if (value < 0) 'L' else 'R'
-        val power: Byte = 100 // PWM/Power always 100 for now
+        val power: Byte = 100 
         val rtLo = (runtimeMs and 0xFF).toByte()
         val rtHi = ((runtimeMs shr 8) and 0xFF).toByte()
         val frame = byteArrayOf('s'.code.toByte(), dir.code.toByte(), power, rtLo, rtHi)
@@ -336,9 +349,6 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                         val mvStr = s.substring(1).filter { it.isDigit() }
                         if (mvStr.isNotEmpty()) {
                             val mv = mvStr.toInt()
-                            // Sensor: CC6903SO-30A
-                            // 3.3V supply: 1.65V (1650mV) = 0A. 
-                            // 30A full scale corresponds to 0V or 3.3V (approx 55mV/A)
                             val amps = abs(mv - 1650) / 55.0f
                             _sensorCurrent.value = amps
                             logTextToFile("RECV_CURR", "Raw: $s, Amps: $amps")

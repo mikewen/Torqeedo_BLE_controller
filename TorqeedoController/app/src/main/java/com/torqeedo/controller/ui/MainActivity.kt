@@ -1,7 +1,6 @@
 package com.torqeedo.controller.ui
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
@@ -36,46 +35,39 @@ class MainActivity : AppCompatActivity() {
     private val vm: MainViewModel by viewModels()
     private lateinit var deviceAdapter: DeviceListAdapter
 
-    private val enableBtLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()) {}
-
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
         if (results.values.all { it }) {
             ensureBluetoothEnabled()
         } else {
-            showSnack("Permissions (Bluetooth & Location) are required for GPS and BLE.")
+            showSnack("Permissions required for BLE")
         }
     }
+
+    private val enableBtLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { _ -> }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        setupDeviceList()
-        setupControls()
+        setupUI()
         observeState()
         requestPermissionsIfNeeded()
     }
 
-    override fun onStop() {
-        super.onStop()
-        vm.stopScan()
-    }
-
-    private fun setupDeviceList() {
-        deviceAdapter = DeviceListAdapter { device -> vm.connect(device) }
+    private fun setupUI() {
+        deviceAdapter = DeviceListAdapter { device ->
+            vm.connect(device)
+        }
         binding.rvDevices.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = deviceAdapter
         }
-    }
 
-    @SuppressLint("ClickableViewAccessibility")
-    private fun setupControls() {
-        // Debug Settings
         binding.switchShowRaw.setOnCheckedChangeListener { _, isChecked ->
             vm.setShowRawData(isChecked)
         }
@@ -198,18 +190,9 @@ class MainActivity : AppCompatActivity() {
             vm.resetSteer()
         }
 
-        // Calibration Buttons
-        binding.btnCalibZero.setOnClickListener {
-            vm.calibrateZero()
-            showSnack("Zero position calibrated")
-        }
-        binding.btnCalibPort.setOnClickListener {
-            vm.calibratePort()
-            showSnack("Port max position calibrated")
-        }
-        binding.btnCalibStbd.setOnClickListener {
-            vm.calibrateStbd()
-            showSnack("Starboard max position calibrated")
+        // Calibrate Sensors Button
+        binding.btnCalibrate.setOnClickListener {
+            startActivity(Intent(this, CalibrationActivity::class.java))
         }
 
         // Disconnect Button
@@ -233,6 +216,7 @@ class MainActivity : AppCompatActivity() {
     private fun observeState() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
+                // Control Panel Visibility
                 launch {
                     combine(vm.motorConnectionState, vm.imuConnectionState, vm.remoteConnected) { motor, imu, remote ->
                         val motorConnected = motor == TorqeedoBleManager.ConnectionState.CONNECTED
@@ -243,6 +227,32 @@ class MainActivity : AppCompatActivity() {
                         //binding.controlPanel.visibility = if (anyConnected) View.VISIBLE else View.GONE
                         binding.controlPanel.visibility = if (motorConnected) View.VISIBLE else View.GONE
                         binding.scanPanel.visibility    = if (motorConnected) View.GONE else View.VISIBLE
+                    }
+                }
+
+                // Motor-dependent Cards Visibility
+                launch {
+                    combine(vm.motorConnectionState, vm.showMotorStatus) { state, show ->
+                        state == TorqeedoBleManager.ConnectionState.CONNECTED && show
+                    }.collectLatest { show ->
+                        binding.motorDataCard.visibility = if (show) View.VISIBLE else View.GONE
+                    }
+                }
+
+                launch {
+                    vm.motorConnectionState.collectLatest { state ->
+                        val connected = state == TorqeedoBleManager.ConnectionState.CONNECTED
+                        binding.telemetryCard.visibility = if (connected) View.VISIBLE else View.GONE
+                        binding.motorControlCard.visibility = if (connected) View.VISIBLE else View.GONE
+                        binding.steeringCard.visibility = if (connected) View.VISIBLE else View.GONE
+                    }
+                }
+
+                // IMU-dependent Card Visibility
+                launch {
+                    vm.imuConnectionState.collectLatest { state ->
+                        val connected = state == TorqeedoBleManager.ConnectionState.CONNECTED
+                        binding.witMotionCard.visibility = if (connected) View.VISIBLE else View.GONE
                     }
                 }
 
@@ -277,8 +287,6 @@ class MainActivity : AppCompatActivity() {
                         }
                         binding.tvImuStatus.setTextColor(ContextCompat.getColor(this@MainActivity,
                             if (state == TorqeedoBleManager.ConnectionState.CONNECTED) R.color.status_connected else R.color.text_secondary))
-                        
-                        binding.witMotionCard.visibility = if (state == TorqeedoBleManager.ConnectionState.CONNECTED) View.VISIBLE else View.GONE
                     }
                 }
 
@@ -330,13 +338,6 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     vm.enableVoicePrompts.collectLatest { enabled ->
                         binding.switchVoice.isChecked = enabled
-                    }
-                }
-
-                launch {
-                    vm.showMotorStatus.collectLatest { show ->
-                        binding.switchShowMotorStatus.isChecked = show
-                        binding.motorDataCard.visibility = if (show) View.VISIBLE else View.GONE
                     }
                 }
 
@@ -402,31 +403,28 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                // Magnetometer Observation
                 launch {
-                    vm.magX.collectLatest { x -> binding.tvMagX.text = "X: $x" }
-                }
-                launch {
-                    vm.magY.collectLatest { y -> binding.tvMagY.text = "Y: $y" }
-                }
-                launch {
-                    vm.magZ.collectLatest { z -> binding.tvMagZ.text = "Z: $z" }
-                }
-                launch {
-                    vm.rudderPosition.collectLatest { pos ->
-                        binding.tvRudderPos.text = "Rudder: %.1f%%".format(pos)
+                    vm.witYaw.collectLatest { yaw ->
+                        binding.tvYaw.text = "%.1f°".format(yaw)
                     }
                 }
 
-                // IMU Observation
                 launch {
-                    vm.witYaw.collectLatest { yaw -> binding.tvYaw.text = "%.1f°".format(yaw) }
+                    vm.witPitch.collectLatest { pitch ->
+                        binding.tvPitch.text = "%.1f°".format(pitch)
+                    }
                 }
+
                 launch {
-                    vm.witPitch.collectLatest { pitch -> binding.tvPitch.text = "%.1f°".format(pitch) }
+                    vm.witRoll.collectLatest { roll ->
+                        binding.tvRoll.text = "%.1f°".format(roll)
+                    }
                 }
+
                 launch {
-                    vm.witRoll.collectLatest { roll -> binding.tvRoll.text = "%.1f°".format(roll) }
+                    vm.rudderPosition.collectLatest { pos ->
+                        binding.tvSteerAngle.text = "Steer Angle: %.0f%%".format(pos)
+                    }
                 }
 
                 launch {

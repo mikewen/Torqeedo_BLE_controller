@@ -12,10 +12,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.location.*
-import com.torqeedo.controller.ble.BleScanner
-import com.torqeedo.controller.ble.DiscoveredDevice
-import com.torqeedo.controller.ble.LookbonRemote
-import com.torqeedo.controller.ble.TorqeedoBleManager
+import com.torqeedo.controller.ble.*
 import com.torqeedo.controller.protocol.TorqeedoProtocol
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -92,9 +89,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private val bluetoothAdapter: BluetoothAdapter =
         (application.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
 
-    val motorManager = TorqeedoBleManager(application)
-    val imuManager   = TorqeedoBleManager(application)
-    val remote       = LookbonRemote(application)
+    val motorManager = BleRepository.getMotorManager(application)
+    val imuManager   = BleRepository.getImuManager(application)
+    val remote       = BleRepository.getRemote(application)
     val scanner      = BleScanner(bluetoothAdapter)
 
     val motorConnectionState: StateFlow<TorqeedoBleManager.ConnectionState> = motorManager.connectionState
@@ -205,13 +202,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         imuManager.setLoggingEnabled(_enableLogging.value)
 
         // Auto-reconnect to remote if we have a saved MAC
-        prefs.getString(KEY_REMOTE_MAC, null)?.let { mac ->
-            try {
-                val device = bluetoothAdapter.getRemoteDevice(mac)
-                remote.connectToDevice(device, autoReconnect = true)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to auto-reconnect to remote: $mac", e)
+        if (!remote.isConnected) {
+            prefs.getString(KEY_REMOTE_MAC, null)?.let { mac ->
+                try {
+                    val device = bluetoothAdapter.getRemoteDevice(mac)
+                    remote.connectToDevice(device, autoReconnect = true)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to auto-reconnect to remote: $mac", e)
+                }
             }
+        } else {
+            _remoteConnected.value = true
         }
     }
 
@@ -348,13 +349,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private fun setupWitMotion() {
         viewModelScope.launch {
             imuManager.witMotionData.collect { frame ->
-                if (frame.size < 11) return@collect
+                if (frame.size < 2) return@collect
                 val type = frame[1].toInt() and 0xFF
+                Log.d(TAG, "RECV WIT frame type: 0x%02X, size: %d".format(type, frame.size))
+                
                 when (type) {
-                    0x53 -> { // Angle: Roll, Pitch, Yaw
+                    0x53 -> { // Angle: Roll, Pitch, Yaw (11-byte frame)
+                        if (frame.size < 11) return@collect
                         val rollRaw  = ((frame[3].toInt() shl 8) or (frame[2].toInt() and 0xFF)).toShort()
                         val pitchRaw = ((frame[5].toInt() shl 8) or (frame[4].toInt() and 0xFF)).toShort()
                         val yawRaw   = ((frame[7].toInt() shl 8) or (frame[6].toInt() and 0xFF)).toShort()
+                        
+                        _witRoll.value  = rollRaw  / 32768f * 180f
+                        _witPitch.value = pitchRaw / 32768f * 180f
+                        _witYaw.value   = yawRaw   / 32768f * 180f
+                    }
+                    0x61 -> { // Combined BLE 5.0 Data (20-byte frame)
+                        if (frame.size < 20) return@collect
+                        // Roll: [14..15], Pitch: [16..17], Yaw: [18..19]
+                        val rollRaw  = ((frame[15].toInt() shl 8) or (frame[14].toInt() and 0xFF)).toShort()
+                        val pitchRaw = ((frame[17].toInt() shl 8) or (frame[16].toInt() and 0xFF)).toShort()
+                        val yawRaw   = ((frame[19].toInt() shl 8) or (frame[18].toInt() and 0xFF)).toShort()
                         
                         _witRoll.value  = rollRaw  / 32768f * 180f
                         _witPitch.value = pitchRaw / 32768f * 180f
@@ -466,7 +481,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     device.name.contains("LOOKBON", ignoreCase = true) -> {
                         remote.connectToDevice(device.device, autoReconnect = true)
                     }
-                    device.name.contains("IMU", ignoreCase = true) -> {
+                    device.name.contains("IMU", ignoreCase = true) || device.name.contains("WitMotion", ignoreCase = true) -> {
                         imuManager.connectToDevice(device.device)
                     }
                     else -> {
@@ -682,12 +697,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     override fun onCleared() {
         super.onCleared()
-        stopLoops()
-        stopGpsUpdates()
-        motorManager.disconnectDevice()
-        imuManager.disconnectDevice()
-        remote.disconnect().enqueue()
-        tts?.shutdown()
-        tts = null
     }
 }
