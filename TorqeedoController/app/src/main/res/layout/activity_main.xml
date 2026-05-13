@@ -746,6 +746,15 @@
             </androidx.cardview.widget.CardView>
 
             <Button
+                android:id="@+id/btnAutoPilot"
+                style="@style/Widget.TorqeedoController.Button.Primary"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="8dp"
+                android:text="AUTO-PILOT"
+                android:textSize="16sp" />
+
+            <Button
                 android:id="@+id/btnCalibrate"
                 style="@style/Widget.TorqeedoController.Button.Secondary"
                 android:layout_width="match_parent"

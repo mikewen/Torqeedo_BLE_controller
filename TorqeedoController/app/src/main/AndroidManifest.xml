@@ -43,5 +43,11 @@
             android:screenOrientation="portrait"
             android:label="Calibration" />
 
+        <activity
+            android:name=".ui.AutoPilotActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:label="Auto-Pilot" />
+
     </application>
 </manifest>

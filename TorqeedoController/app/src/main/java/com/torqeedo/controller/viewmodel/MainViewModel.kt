@@ -56,6 +56,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         private const val STEER_REPEAT_DELAY = 80L      // 12.5 Hz repeat rate for steering
         const val STEER_MAX = 50
         private const val DEFAULT_STEER_SCALE = 10
+
+        private const val AUTOPILOT_DELAY = 500L         // 2 Hz autopilot loop
     }
 
     private val prefs: SharedPreferences = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -205,12 +207,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private val _gpsCourse = MutableStateFlow<Int?>(null)
     val gpsCourse: StateFlow<Int?> = _gpsCourse.asStateFlow()
 
+    // Auto-pilot state
+    private val _autoPilotActive = MutableStateFlow(false)
+    val autoPilotActive: StateFlow<Boolean> = _autoPilotActive.asStateFlow()
+
+    private val _targetHeading = MutableStateFlow(0f)
+    val targetHeading: StateFlow<Float> = _targetHeading.asStateFlow()
+
     private var throttleJob: Job? = null
     private var statusQueryJob: Job? = null
     private var sensorReadJob: Job? = null
     private var autoAdjustmentJob: Job? = null
     private var steerRepeatJob: Job? = null
     private var resetSteerJob: Job? = null
+    private var autoPilotJob: Job? = null
 
     private var tts: TextToSpeech? = TextToSpeech(application, this)
 
@@ -701,6 +711,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         autoAdjustmentJob = null
     }
 
+    // ── Auto-pilot ───────────────────────────────────────────────────────
+    fun setAutoPilotActive(active: Boolean) {
+        if (active == _autoPilotActive.value) return
+        _autoPilotActive.value = active
+        if (active) {
+            _targetHeading.value = trueHeading.value
+            speak("Autopilot engaged")
+            startAutoPilotLoop()
+        } else {
+            stopAutoPilotLoop()
+            speak("Autopilot disengaged")
+        }
+    }
+
+    fun setTargetHeading(heading: Float) {
+        var normalized = heading
+        while (normalized < 0) normalized += 360f
+        while (normalized >= 360) normalized -= 360f
+        _targetHeading.value = normalized
+    }
+
+    fun adjustTargetHeading(delta: Float) {
+        setTargetHeading(_targetHeading.value + delta)
+    }
+
+    private fun startAutoPilotLoop() {
+        autoPilotJob?.cancel()
+        autoPilotJob = viewModelScope.launch {
+            while (true) {
+                val current = trueHeading.value
+                val target = _targetHeading.value
+                
+                var error = target - current
+                while (error > 180f) error -= 360f
+                while (error < -180f) error += 360f
+                
+                // Simple Bang-bang or P-controller for steering
+                if (abs(error) > 1.0f) {
+                    val steerDelta = if (error > 0) 1 else -1
+                    adjustSteer(steerDelta)
+                }
+                
+                delay(AUTOPILOT_DELAY)
+            }
+        }
+    }
+
+    private fun stopAutoPilotLoop() {
+        autoPilotJob?.cancel()
+        autoPilotJob = null
+    }
+
     // ── Loops ─────────────────────────────────────────────────────────────
     private fun startLoops() {
         startThrottleLoop()
@@ -714,6 +776,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         stopSensorReadLoop()
         stopAutoAdjustment()
         stopSteerRepeat()
+        stopAutoPilotLoop()
+        _autoPilotActive.value = false
         resetSteerJob?.cancel()
     }
 

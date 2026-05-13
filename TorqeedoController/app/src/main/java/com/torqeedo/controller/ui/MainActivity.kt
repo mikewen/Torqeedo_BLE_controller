@@ -190,6 +190,11 @@ class MainActivity : AppCompatActivity() {
             vm.resetSteer()
         }
 
+        // Auto-Pilot Button
+        binding.btnAutoPilot.setOnClickListener {
+            startActivity(Intent(this, AutoPilotActivity::class.java))
+        }
+
         // Calibrate Sensors Button
         binding.btnCalibrate.setOnClickListener {
             startActivity(Intent(this, CalibrationActivity::class.java))
