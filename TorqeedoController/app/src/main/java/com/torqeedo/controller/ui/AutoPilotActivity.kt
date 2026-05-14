@@ -138,6 +138,26 @@ class AutoPilotActivity : AppCompatActivity() {
                 }
 
                 launch {
+                    vm.seaState.collectLatest { state ->
+                        binding.tvSeaState.text = state.name
+                        val color = when (state) {
+                            MainViewModel.SeaState.CALM -> R.color.status_connected
+                            MainViewModel.SeaState.MODERATE -> R.color.accent_primary
+                            MainViewModel.SeaState.ROUGH -> R.color.status_disconnected
+                        }
+                        binding.tvSeaState.setTextColor(ContextCompat.getColor(this@AutoPilotActivity, color))
+                    }
+                }
+
+                launch {
+                    kotlinx.coroutines.flow.combine(vm.witPitch, vm.witRoll) { pitch, roll ->
+                        "P: %.1f° R: %.1f°".format(pitch, roll)
+                    }.collectLatest { text ->
+                        binding.tvPitchRoll.text = text
+                    }
+                }
+
+                launch {
                     vm.rudderPosition.collectLatest { pos ->
                         binding.tvRudderPos.text = "%.0f%%".format(pos)
                     }

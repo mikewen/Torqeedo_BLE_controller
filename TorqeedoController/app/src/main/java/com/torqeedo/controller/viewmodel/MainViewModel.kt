@@ -21,10 +21,12 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.max
 
 class MainViewModel(application: Application) : AndroidViewModel(application), TextToSpeech.OnInitListener {
 
     enum class Direction { FORWARD, REVERSE }
+    enum class SeaState { CALM, MODERATE, ROUGH }
 
     companion object {
         private const val TAG = "MainViewModel"
@@ -41,6 +43,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         private const val KEY_CALIB_STBD = "calib_stbd"
 
         private const val KEY_DECLINATION = "declination"
+        private const val KEY_HEADING_OFFSET = "heading_offset"
 
         const val SPEED_MAX = 1000
         const val SPEED_MIN = 0
@@ -157,6 +160,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private val _witYaw = MutableStateFlow(0f)
     val witYaw: StateFlow<Float> = _witYaw.asStateFlow()
 
+    val seaState: StateFlow<SeaState> = combine(witRoll, witPitch) { roll, pitch ->
+        val maxDev = max(abs(roll), abs(pitch))
+        when {
+            maxDev < 3.0f -> SeaState.CALM
+            maxDev < 8.0f -> SeaState.MODERATE
+            else -> SeaState.ROUGH
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SeaState.CALM)
+
     // WitMotion IMU Magnetometer
     private val _witMagX = MutableStateFlow(0)
     val witMagX: StateFlow<Int> = _witMagX.asStateFlow()
@@ -168,8 +180,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private val _declination = MutableStateFlow(prefs.getFloat(KEY_DECLINATION, 0f))
     val declination: StateFlow<Float> = _declination.asStateFlow()
 
-    val trueHeading: StateFlow<Float> = combine(witYaw, _declination) { yaw, decl ->
-        var heading = yaw + decl
+    private val _headingOffset = MutableStateFlow(prefs.getFloat(KEY_HEADING_OFFSET, 0f))
+    val headingOffset: StateFlow<Float> = _headingOffset.asStateFlow()
+
+    val trueHeading: StateFlow<Float> = combine(witYaw, declination, headingOffset) { yaw, decl, offset ->
+        var heading = yaw + decl + offset
         while (heading < 0) heading += 360f
         while (heading >= 360) heading -= 360f
         heading
@@ -250,6 +265,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         setupConnectionVoice()
         setupMagnetometer()
         setupWitMotion()
+        setupAutoCalibration()
         
         // Initial setup for managers from persisted values
         motorManager.setRawDataEnabled(_showRawData.value)
@@ -454,6 +470,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
+    private fun setupAutoCalibration() {
+        viewModelScope.launch {
+            // Nest combines to stay within typed overloads (max 5 flows)
+            val gpsStraightFlow = combine(gpsSpeedKnots, gpsCourse, rudderPosition) { speed, course, rudder ->
+                if (speed > 3.5f && course != null && abs(rudder) < 2.0f) {
+                    course.toFloat()
+                } else {
+                    null
+                }
+            }
+
+            combine(seaState, gpsStraightFlow, witYaw, declination) { state, targetCog, yaw, decl ->
+                if (state == SeaState.CALM && targetCog != null) {
+                    // Conditions met, calculate required offset to match COG
+                    var currentHdgNoOffset = yaw + decl
+                    while (currentHdgNoOffset < 0) currentHdgNoOffset += 360f
+                    while (currentHdgNoOffset >= 360) currentHdgNoOffset -= 360f
+                    
+                    var diff = targetCog - currentHdgNoOffset
+                    while (diff > 180f) diff -= 360f
+                    while (diff < -180f) diff += 360f
+                    diff
+                } else {
+                    null
+                }
+            }.collectLatest { targetOffset ->
+                if (targetOffset != null) {
+                    val currentOffset = _headingOffset.value
+                    var diff = targetOffset - currentOffset
+                    while (diff > 180f) diff -= 360f
+                    while (diff < -180f) diff += 360f
+                    
+                    // Very slow adjustment (0.1% per update) to pull the offset toward target
+                    val newOffset = currentOffset + (diff * 0.001f) 
+
+                    if (abs(newOffset - currentOffset) > 0.0001f) {
+                        _headingOffset.value = newOffset
+                        prefs.edit().putFloat(KEY_HEADING_OFFSET, newOffset).apply()
+                    }
+                }
+            }
+        }
+    }
+
     // ── GPS ───────────────────────────────────────────────────────────────
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(locationResult: LocationResult) {
@@ -577,6 +637,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         speak("Calibration saved")
     }
 
+    fun resetHeadingOffset() {
+        _headingOffset.value = 0f
+        prefs.edit().remove(KEY_HEADING_OFFSET).apply()
+        speak("Heading offset reset")
+    }
+
     // ── Connect / disconnect ──────────────────────────────────────────────
     fun connect(device: DiscoveredDevice) {
         scanner.stopScan()
@@ -652,7 +718,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             val next = _speedMagnitude.value - _speedStep.value
             if (next < 0) {
                 _direction.value = Direction.REVERSE
-                _speedMagnitude.value = -next
+                _speedMagnitude.value = next
             } else {
                 _speedMagnitude.value = next
             }
