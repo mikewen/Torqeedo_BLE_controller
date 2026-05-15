@@ -68,6 +68,7 @@ class BleScanner(private val adapter: BluetoothAdapter) {
         } else {
             listOf(
                 ScanFilter.Builder().setDeviceName("AC6328_UART").build(),
+                ScanFilter.Builder().setDeviceName("AC6328_GPS").build(),
                 ScanFilter.Builder().setDeviceName("Steer_UART").build(),
                 ScanFilter.Builder().setDeviceName("GPS_Steer").build(),
                 ScanFilter.Builder().setDeviceName("LOOKBON").build(),
@@ -103,6 +104,22 @@ class BleScanner(private val adapter: BluetoothAdapter) {
 
         val filters = listOf(
             ScanFilter.Builder().setDeviceName("IMU_WitMotion").build()
+        )
+        
+        internalStartScan(filters, settings)
+    }
+
+    fun startGpsScan() {
+        if (_isScanning.value) return
+        _devices.value = emptyList()
+
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .build()
+
+        val filters = listOf(
+            ScanFilter.Builder().setDeviceName("AC6328_GPS").build(),
+            ScanFilter.Builder().setDeviceName("GPS_Steer").build()
         )
         
         internalStartScan(filters, settings)

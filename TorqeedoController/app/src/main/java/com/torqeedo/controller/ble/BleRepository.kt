@@ -9,6 +9,7 @@ import android.util.Log
 object BleRepository {
     private var motorManager: TorqeedoBleManager? = null
     private var imuManager: TorqeedoBleManager? = null
+    private var gpsManager: TorqeedoBleManager? = null
     private var remote: LookbonRemote? = null
 
     fun getMotorManager(context: Context): TorqeedoBleManager {
@@ -17,6 +18,10 @@ object BleRepository {
 
     fun getImuManager(context: Context): TorqeedoBleManager {
         return imuManager ?: TorqeedoBleManager(context.applicationContext).also { imuManager = it }
+    }
+
+    fun getGpsManager(context: Context): TorqeedoBleManager {
+        return gpsManager ?: TorqeedoBleManager(context.applicationContext).also { gpsManager = it }
     }
 
     fun getRemote(context: Context): LookbonRemote {

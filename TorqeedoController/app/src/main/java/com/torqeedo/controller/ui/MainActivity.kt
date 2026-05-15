@@ -216,6 +216,10 @@ class MainActivity : AppCompatActivity() {
         binding.btnScanImu.setOnClickListener {
             if (vm.isScanning.value) vm.stopScan() else vm.startImuScan()
         }
+
+        binding.btnScanGps.setOnClickListener {
+            if (vm.isScanning.value) vm.stopScan() else vm.startGpsScan()
+        }
     }
 
     private fun observeState() {
@@ -223,13 +227,13 @@ class MainActivity : AppCompatActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 // Control Panel Visibility
                 launch {
-                    combine(vm.motorConnectionState, vm.imuConnectionState, vm.remoteConnected) { motor, imu, remote ->
+                    combine(vm.motorConnectionState, vm.imuConnectionState, vm.gpsConnectionState, vm.remoteConnected) { motor, imu, gps, remote ->
                         val motorConnected = motor == TorqeedoBleManager.ConnectionState.CONNECTED
                         val imuConnected = imu == TorqeedoBleManager.ConnectionState.CONNECTED
-                        val anyConnected = motorConnected || imuConnected || remote
+                        val gpsConnected = gps == TorqeedoBleManager.ConnectionState.CONNECTED
+                        val anyConnected = motorConnected || imuConnected || gpsConnected || remote
                         Pair(anyConnected, motorConnected)
                     }.collectLatest { (anyConnected, motorConnected) ->
-                        //binding.controlPanel.visibility = if (anyConnected) View.VISIBLE else View.GONE
                         binding.controlPanel.visibility = if (motorConnected) View.VISIBLE else View.GONE
                         binding.scanPanel.visibility    = if (motorConnected) View.GONE else View.VISIBLE
                     }
@@ -296,6 +300,18 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 launch {
+                    vm.gpsConnectionState.collectLatest { state ->
+                        binding.tvGpsStatusTop.text = when(state) {
+                            TorqeedoBleManager.ConnectionState.CONNECTED -> "GPS: On"
+                            TorqeedoBleManager.ConnectionState.CONNECTING -> "GPS: …"
+                            else -> "GPS: Off"
+                        }
+                        binding.tvGpsStatusTop.setTextColor(ContextCompat.getColor(this@MainActivity,
+                            if (state == TorqeedoBleManager.ConnectionState.CONNECTED) R.color.status_connected else R.color.text_secondary))
+                    }
+                }
+
+                launch {
                     vm.remoteConnected.collectLatest { connected ->
                         binding.tvRemoteStatus.text = if (connected) "Rem: On" else "Rem: Off"
                         binding.tvRemoteStatus.setTextColor(ContextCompat.getColor(this@MainActivity,
@@ -316,6 +332,7 @@ class MainActivity : AppCompatActivity() {
                         binding.btnScan.text = if (scanning) "Stop Scan" else "Scan for Motor"
                         binding.btnScanRemote.text = if (scanning) "Stop Scan" else "Scan for Remote"
                         binding.btnScanImu.text = if (scanning) "Stop Scan" else "Scan for Heading"
+                        binding.btnScanGps.text = if (scanning) "Stop Scan" else "Scan for GPS"
                         binding.scanProgress.visibility = if (scanning) View.VISIBLE else View.GONE
                         binding.switchScanAll.isEnabled = !scanning
                     }

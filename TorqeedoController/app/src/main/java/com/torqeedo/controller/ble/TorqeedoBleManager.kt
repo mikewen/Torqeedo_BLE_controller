@@ -44,6 +44,7 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
 
         private const val SENSOR_HEADER: Byte = 0xA5.toByte()
         private const val WIT_HEADER: Byte = 0x55.toByte()
+        private const val GPS_HEADER: Byte = 0xA3.toByte()
     }
 
     private var ae10Char: BluetoothGattCharacteristic? = null
@@ -134,6 +135,9 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
     private val _witMotionData = MutableSharedFlow<ByteArray>(replay = 1)
     val witMotionData: SharedFlow<ByteArray> = _witMotionData.asSharedFlow()
 
+    private val _bleGpsData = MutableSharedFlow<ByteArray>(replay = 1)
+    val bleGpsData: SharedFlow<ByteArray> = _bleGpsData.asSharedFlow()
+
     private val _rawStatusFlow = MutableSharedFlow<ByteArray>(replay = 1)
     val rawStatusFlow: SharedFlow<ByteArray> = _rawStatusFlow.asSharedFlow()
 
@@ -191,8 +195,9 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
             val idxAC = rxBuffer.indexOf(TorqeedoProtocol.HEADER)
             val idxA5 = rxBuffer.indexOf(SENSOR_HEADER)
             val idx55 = rxBuffer.indexOf(WIT_HEADER)
+            val idxA3 = rxBuffer.indexOf(GPS_HEADER)
 
-            val startIdx = listOf(idxAC, idxA5, idx55).filter { it != -1 }.minOrNull() ?: -1
+            val startIdx = listOf(idxAC, idxA5, idx55, idxA3).filter { it != -1 }.minOrNull() ?: -1
 
             if (startIdx == -1) {
                 if (rxBuffer.size > 1024) rxBuffer.clear()
@@ -202,7 +207,7 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                 repeat(startIdx) { rxBuffer.removeAt(0) }
             }
 
-            // Now rxBuffer[0] is either 0xAC, 0xA5 or 0x55
+            // Now rxBuffer[0] is one of our headers
             val header = rxBuffer[0]
 
             when (header) {
@@ -246,6 +251,22 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                         return // Wait for type byte
                     }
                 }
+                GPS_HEADER -> {
+                    // GPS packet is 17 bytes: [0xA3, Time x 4, Lat x 4, Lon x 4, Spd x 2, Cog x 2]
+                    if (rxBuffer.size >= 17) {
+                        val frame = rxBuffer.take(17).toByteArray()
+                        repeat(17) { rxBuffer.removeAt(0) }
+                        
+                        _bleGpsData.tryEmit(frame)
+
+                        if (isRawDataEnabled) {
+                            logToFile("RECV_GPS", frame)
+                            _rawStatusFlow.tryEmit(frame)
+                        }
+                    } else {
+                        return
+                    }
+                }
                 else -> {
                     // TQ Bus logic (0xAC)
                     var frameEndIdx = -1
@@ -253,7 +274,8 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                         if (rxBuffer[i] == TorqeedoProtocol.HEADER ||
                             rxBuffer[i] == TorqeedoProtocol.FOOTER ||
                             rxBuffer[i] == SENSOR_HEADER ||
-                            rxBuffer[i] == WIT_HEADER) {
+                            rxBuffer[i] == WIT_HEADER ||
+                            rxBuffer[i] == GPS_HEADER) {
                             frameEndIdx = i
                             break
                         }

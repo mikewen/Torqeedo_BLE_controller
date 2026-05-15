@@ -107,11 +107,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     val motorManager = BleRepository.getMotorManager(application)
     val imuManager   = BleRepository.getImuManager(application)
+    val gpsManager   = BleRepository.getGpsManager(application)
     val remote       = BleRepository.getRemote(application)
     val scanner      = BleScanner(bluetoothAdapter)
 
     val motorConnectionState: StateFlow<TorqeedoBleManager.ConnectionState> = motorManager.connectionState
     val imuConnectionState:   StateFlow<TorqeedoBleManager.ConnectionState> = imuManager.connectionState
+    val gpsConnectionState:   StateFlow<TorqeedoBleManager.ConnectionState> = gpsManager.connectionState
     
     private val _remoteConnected = MutableStateFlow(false)
     val remoteConnected: StateFlow<Boolean> = _remoteConnected.asStateFlow()
@@ -257,6 +259,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private var steerRepeatJob: Job? = null
     private var resetSteerJob: Job? = null
     private var autoPilotJob: Job? = null
+    
+    private var lastBleGpsUpdate = 0L
 
     private var tts: TextToSpeech? = TextToSpeech(application, this)
 
@@ -265,6 +269,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         setupConnectionVoice()
         setupMagnetometer()
         setupWitMotion()
+        setupBleGps()
         setupAutoCalibration()
         
         // Initial setup for managers from persisted values
@@ -272,6 +277,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         motorManager.setLoggingEnabled(_enableLogging.value)
         imuManager.setRawDataEnabled(_showRawData.value)
         imuManager.setLoggingEnabled(_enableLogging.value)
+        gpsManager.setRawDataEnabled(_showRawData.value)
+        gpsManager.setLoggingEnabled(_enableLogging.value)
 
         // Auto-reconnect to remote if we have a saved MAC
         if (!remote.isConnected) {
@@ -383,7 +390,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     private fun setupConnectionVoice() {
         viewModelScope.launch {
-            motorConnectionState.drop(1).collect { state ->
+            motorConnectionState.collect { state ->
                 when (state) {
                     TorqeedoBleManager.ConnectionState.CONNECTED -> speak("Motor connected")
                     TorqeedoBleManager.ConnectionState.DISCONNECTED -> speak("Motor disconnected")
@@ -392,10 +399,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             }
         }
         viewModelScope.launch {
-            imuConnectionState.drop(1).collect { state ->
+            imuConnectionState.collect { state ->
                 when (state) {
                     TorqeedoBleManager.ConnectionState.CONNECTED -> speak("Heading sensor connected")
                     TorqeedoBleManager.ConnectionState.DISCONNECTED -> speak("Heading sensor disconnected")
+                    else -> {}
+                }
+            }
+        }
+        viewModelScope.launch {
+            gpsConnectionState.collect { state ->
+                when (state) {
+                    TorqeedoBleManager.ConnectionState.CONNECTED -> speak("G P S connected")
+                    TorqeedoBleManager.ConnectionState.DISCONNECTED -> speak("G P S disconnected")
                     else -> {}
                 }
             }
@@ -470,6 +486,55 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
+    private fun setupBleGps() {
+        val processGpsFrame: (ByteArray) -> Unit = { frame ->
+            if (frame.size >= 17) {
+                lastBleGpsUpdate = System.currentTimeMillis()
+
+                val latRaw = readS32LE(frame, 5)
+                val longitudeRaw = readS32LE(frame, 9)
+                val speedRaw = readU16LE(frame, 13)
+                val courseRaw = readU16LE(frame, 15)
+
+                val lat = latRaw / 1_000_000.0
+                val lon = longitudeRaw / 1_000_000.0
+                val speedKnots = speedRaw / 100.0f
+                val course = (courseRaw / 100.0f).toInt()
+
+                _gpsFix.value = true
+                _gpsSpeedKnots.value = speedKnots
+                _gpsCourse.value = course
+                
+                motorManager.updateGpsInfo(lat, lon, speedKnots, course)
+                gpsManager.updateGpsInfo(lat, lon, speedKnots, course)
+
+                // Update magnetic declination
+                val geomag = GeomagneticField(
+                    lat.toFloat(),
+                    lon.toFloat(),
+                    0f,
+                    System.currentTimeMillis()
+                )
+                val decl = geomag.declination
+                if (abs(_declination.value - decl) > 0.1f) {
+                    _declination.value = decl
+                    prefs.edit().putFloat(KEY_DECLINATION, decl).apply()
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            motorManager.bleGpsData.collect { frame ->
+                processGpsFrame(frame)
+            }
+        }
+        viewModelScope.launch {
+            gpsManager.bleGpsData.collect { frame ->
+                processGpsFrame(frame)
+            }
+        }
+    }
+
     private fun setupAutoCalibration() {
         viewModelScope.launch {
             // Nest combines to stay within typed overloads (max 5 flows)
@@ -517,6 +582,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     // ── GPS ───────────────────────────────────────────────────────────────
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(locationResult: LocationResult) {
+            // If BLE GPS has been updated recently (within last 2 seconds), ignore phone GPS
+            if (System.currentTimeMillis() - lastBleGpsUpdate < 2000) return
+
             val location = locationResult.lastLocation ?: return
             _gpsFix.value = true
             val speedKnots = location.speed * 1.94384f
@@ -539,7 +607,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             }
         }
         override fun onLocationAvailability(availability: LocationAvailability) {
-            _gpsFix.value = availability.isLocationAvailable
+            if (System.currentTimeMillis() - lastBleGpsUpdate < 2000) {
+                _gpsFix.value = true
+            } else {
+                _gpsFix.value = availability.isLocationAvailable
+            }
         }
     }
 
@@ -565,13 +637,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     fun startScan() = scanner.startScan(_scanAllNames.value)
     fun startRemoteScan() = scanner.startRemoteScan()
     fun startImuScan() = scanner.startImuScan()
+    fun startGpsScan() = scanner.startGpsScan()
     fun stopScan()  = scanner.stopScan()
+
+    fun connect(discovered: DiscoveredDevice) {
+        val name = discovered.name
+        val device = discovered.device
+        
+        viewModelScope.launch {
+            try {
+                when {
+                    name.contains("LOOKBON", ignoreCase = true) -> {
+                        remote.connectToDevice(device)
+                    }
+                    name.contains("WitMotion", ignoreCase = true) -> {
+                        imuManager.connectToDevice(device)
+                    }
+                    name.contains("GPS", ignoreCase = true) -> {
+                        gpsManager.connectToDevice(device)
+                    }
+                    else -> {
+                        motorManager.connectToDevice(device)
+                    }
+                }
+                stopScan()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to connect to $name: ${e.message}")
+            }
+        }
+    }
+
+    fun disconnect() {
+        motorManager.disconnectDevice()
+        imuManager.disconnectDevice()
+        gpsManager.disconnectDevice()
+        remote.disconnect().enqueue()
+    }
 
     // ── Debug ─────────────────────────────────────────────────────────────
     fun setShowRawData(show: Boolean) {
         _showRawData.value = show
         motorManager.setRawDataEnabled(show)
         imuManager.setRawDataEnabled(show)
+        gpsManager.setRawDataEnabled(show)
         prefs.edit().putBoolean(KEY_SHOW_RAW, show).apply()
     }
 
@@ -579,6 +687,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         _enableLogging.value = enabled
         motorManager.setLoggingEnabled(enabled)
         imuManager.setLoggingEnabled(enabled)
+        gpsManager.setLoggingEnabled(enabled)
         prefs.edit().putBoolean(KEY_LOGGING, enabled).apply()
     }
 
@@ -626,15 +735,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     }
 
     fun startImuMagCalibration() {
-        imuManager.sendWitCalibration(0x02) // Magnetic
+        imuManager.sendWitCalibration(0x02) // Magnetometer
         _imuCalibStatus.value = "Mag Calibrating..."
-        speak("Magnetic calibration started. Rotate sensor in all directions.")
+        speak("Magnetometer calibration started. Rotate sensor in all axes.")
     }
 
     fun saveImuCalibration() {
-        imuManager.sendWitCalibration(0x00) // Save/Exit
+        imuManager.sendWitCalibration(0x00) // Finish/Save
         _imuCalibStatus.value = "Idle"
-        speak("Calibration saved")
+        speak("Calibration finished")
     }
 
     fun resetHeadingOffset() {
@@ -643,37 +752,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         speak("Heading offset reset")
     }
 
-    // ── Connect / disconnect ──────────────────────────────────────────────
-    fun connect(device: DiscoveredDevice) {
-        scanner.stopScan()
-        viewModelScope.launch {
-            try {
-                when {
-                    device.name.contains("LOOKBON", ignoreCase = true) -> {
-                        remote.connectToDevice(device.device, autoReconnect = true)
-                    }
-                    device.name.contains("IMU", ignoreCase = true) || device.name.contains("WitMotion", ignoreCase = true) -> {
-                        imuManager.connectToDevice(device.device)
-                    }
-                    else -> {
-                        motorManager.connectToDevice(device.device)
-                        startLoops()
-                        startGpsUpdates()
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to connect to ${device.name}", e)
-            }
-        }
-    }
-
-    fun disconnect() {
-        stopLoops()
-        stopGpsUpdates()
-        motorManager.disconnectDevice()
-        imuManager.disconnectDevice()
-    }
-    
     fun disconnectRemote() {
         prefs.edit().remove(KEY_REMOTE_MAC).apply()
         remote.disconnect().enqueue()
@@ -692,10 +770,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         _throttleDelay.value = ms.coerceIn(50L, 2000L)
     }
 
-    // ── Controls ──────────────────────────────────────────────────────────
+    // ── Throttle / Control ────────────────────────────────────────────────
     fun setDirection(dir: Direction) {
         _direction.value = dir
     }
+
+    fun setSpeedMagnitude(mag: Int) {
+        _speedMagnitude.value = mag.coerceIn(SPEED_MIN, SPEED_MAX)
+    }
+
 
     fun increaseSpeed() {
         if (_direction.value == Direction.FORWARD) {
@@ -718,31 +801,98 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             val next = _speedMagnitude.value - _speedStep.value
             if (next < 0) {
                 _direction.value = Direction.REVERSE
-                _speedMagnitude.value = next
+                _speedMagnitude.value = -next
             } else {
                 _speedMagnitude.value = next
             }
         }
     }
-
     fun stopMotor() {
         stopAutoAdjustment()
         _speedMagnitude.value = 0
     }
-    
-    fun resetSteer() {
-        stopSteerRepeat()
-        resetSteerJob?.cancel()
-        resetSteerJob = viewModelScope.launch {
-            while (_steerValue.value != 0) {
-                val current = _steerValue.value
-                val step = if (abs(current) >= 5) 5 else 1
-                val delta = if (current > 0) -step else step
-                adjustSteer(delta)
-                delay(STEER_REPEAT_DELAY)
+
+    fun startAutoIncrease(multiplier: Int = 1) {
+        autoAdjustmentJob?.cancel()
+        autoAdjustmentJob = viewModelScope.launch {
+            while (true) {
+                increaseSpeed()
+                delay(_autoIncrementDelay.value / multiplier)
             }
         }
-        speak("Straight")
+    }
+
+    fun startAutoDecrease(multiplier: Int = 1) {
+        autoAdjustmentJob?.cancel()
+        autoAdjustmentJob = viewModelScope.launch {
+            while (true) {
+                decreaseSpeed()
+                delay(_autoIncrementDelay.value / multiplier)
+            }
+        }
+    }
+
+    fun stopAutoAdjustment() {
+        autoAdjustmentJob?.cancel()
+        autoAdjustmentJob = null
+    }
+
+    fun startThrottleLoop() {
+        throttleJob?.cancel()
+        throttleJob = viewModelScope.launch {
+            while (true) {
+                motorManager.sendDrive(currentSpeed.value)
+                delay(_throttleDelay.value)
+            }
+        }
+    }
+
+    fun stopThrottleLoop() {
+        throttleJob?.cancel()
+        throttleJob = null
+    }
+
+    fun startStatusQueryLoop() {
+        statusQueryJob?.cancel()
+        statusQueryJob = viewModelScope.launch {
+            while (true) {
+                motorManager.sendStatusQuery()
+                delay(STATUS_QUERY_DELAY)
+                if (_showMotorStatus.value) {
+                    motorManager.sendSteerStatusQuery()
+                    delay(STATUS_QUERY_DELAY)
+                }
+            }
+        }
+    }
+
+    fun stopStatusQueryLoop() {
+        statusQueryJob?.cancel()
+        statusQueryJob = null
+    }
+    
+    fun startSensorReadLoop() {
+        sensorReadJob?.cancel()
+        sensorReadJob = viewModelScope.launch {
+            while(true) {
+                motorManager.readCurrentSensor()
+                delay(SENSOR_READ_DELAY)
+            }
+        }
+    }
+    
+    fun stopSensorReadLoop() {
+        sensorReadJob?.cancel()
+        sensorReadJob = null
+    }
+
+    // ── Steering ──────────────────────────────────────────────────────────
+    fun setSteerValue(value: Int) {
+        val clamped = value.coerceIn(-STEER_MAX, STEER_MAX)
+        if (_steerValue.value != clamped) {
+            _steerValue.value = clamped
+            motorManager.sendSteer(clamped)
+        }
     }
 
     fun adjustSteer(delta: Int) {
@@ -758,7 +908,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     }
 
     fun startSteerRepeat(delta: Int) {
-        resetSteerJob?.cancel()
         steerRepeatJob?.cancel()
         steerRepeatJob = viewModelScope.launch {
             while (true) {
@@ -773,109 +922,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         steerRepeatJob = null
     }
 
-    fun startAutoIncrease(multiplier: Int = 1) {
-        autoAdjustmentJob?.cancel()
-        autoAdjustmentJob = viewModelScope.launch {
-            while (true) {
-                repeat(multiplier) { increaseSpeed() }
-                delay(_autoIncrementDelay.value)
+    fun resetSteer() {
+        stopSteerRepeat()
+        resetSteerJob?.cancel()
+        resetSteerJob = viewModelScope.launch {
+            while (_steerValue.value != 0) {
+                val current = _steerValue.value
+                val step = if (abs(current) >= 5) 5 else 1
+                val delta = if (current > 0) -step else step
+                adjustSteer(delta)
+                delay(STEER_REPEAT_DELAY)
             }
         }
+        speak("Straight")
     }
 
-    fun startAutoDecrease(multiplier: Int = 1) {
-        autoAdjustmentJob?.cancel()
-        autoAdjustmentJob = viewModelScope.launch {
-            while (true) {
-                repeat(multiplier) { decreaseSpeed() }
-                delay(_autoIncrementDelay.value)
-            }
-        }
-    }
-
-    fun stopAutoAdjustment() {
-        autoAdjustmentJob?.cancel()
-        autoAdjustmentJob = null
-    }
-
-    // ── Auto-pilot ───────────────────────────────────────────────────────
+    // ── Autopilot ─────────────────────────────────────────────────────────
     fun setAutoPilotActive(active: Boolean) {
-        if (active == _autoPilotActive.value) return
-        _autoPilotActive.value = active
         if (active) {
             _targetHeading.value = trueHeading.value
-            speak("Autopilot engaged")
+            autopilotIntegral = 0f
+            autopilotLastError = 0f
+            speak("Auto pilot on, heading ${_targetHeading.value.toInt()} degrees")
             startAutoPilotLoop()
         } else {
+            speak("Auto pilot off")
             stopAutoPilotLoop()
-            speak("Autopilot disengaged")
+            resetSteer()
         }
-    }
-
-    fun setTargetHeading(heading: Float) {
-        var normalized = heading
-        while (normalized < 0) normalized += 360f
-        while (normalized >= 360) normalized -= 360f
-        _targetHeading.value = normalized
+        _autoPilotActive.value = active
     }
 
     fun adjustTargetHeading(delta: Float) {
-        setTargetHeading(_targetHeading.value + delta)
-    }
-
-    fun setApKp(value: Float) {
-        _apKp.value = value
-        prefs.edit().putFloat(KEY_AP_KP, value).apply()
-    }
-
-    fun setApKi(value: Float) {
-        _apKi.value = value
-        prefs.edit().putFloat(KEY_AP_KI, value).apply()
-    }
-
-    fun setApKd(value: Float) {
-        _apKd.value = value
-        prefs.edit().putFloat(KEY_AP_KD, value).apply()
+        var newTarget = _targetHeading.value + delta
+        while (newTarget < 0) newTarget += 360f
+        while (newTarget >= 360) newTarget -= 360f
+        _targetHeading.value = newTarget
+        speak("${newTarget.toInt()} degrees")
     }
 
     private fun startAutoPilotLoop() {
         autoPilotJob?.cancel()
-        autopilotLastError = 0f
-        autopilotIntegral = 0f
-
         autoPilotJob = viewModelScope.launch {
-            val dt = AUTOPILOT_DELAY / 1000f // Loop period in seconds
             while (true) {
-                val current = trueHeading.value
-                val target = _targetHeading.value
-                
-                var error = target - current
-                while (error > 180f) error -= 360f
-                while (error < -180f) error += 360f
-                
-                // PID Calculation
-                val p = _apKp.value * error
-                
-                autopilotIntegral += error * dt
-                autopilotIntegral = autopilotIntegral.coerceIn(-AUTOPILOT_MAX_I, AUTOPILOT_MAX_I) // Anti-windup
-                val i = _apKi.value * autopilotIntegral
-                
-                val d = _apKd.value * (error - autopilotLastError) / dt
-                autopilotLastError = error
-                
-                // Output is desired rudder position (-100 to 100)
-                val desiredRudder = (p + i + d).coerceIn(-100f, 100f)
-                
-                // Inner loop: Move actual rudder toward desiredRudder
-                val currentRudder = rudderPosition.value
-                val rudderError = desiredRudder - currentRudder
-                
-                // If there's a significant difference, issue a steer command
-                if (abs(rudderError) > 5f) {
-                    val steerDelta = if (rudderError > 0) 1 else -1
-                    adjustSteer(steerDelta)
-                }
-                
+                updateAutoPilot()
                 delay(AUTOPILOT_DELAY)
             }
         }
@@ -886,77 +976,76 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         autoPilotJob = null
     }
 
-    // ── Loops ─────────────────────────────────────────────────────────────
-    private fun startLoops() {
-        startThrottleLoop()
-        startStatusQueryLoop()
-        startSensorReadLoop()
+    private fun updateAutoPilot() {
+        val current = trueHeading.value
+        val target = _targetHeading.value
+        
+        var error = target - current
+        while (error > 180f) error -= 360f
+        while (error < -180f) error += 360f
+        
+        // PID Calculation
+        autopilotIntegral = (autopilotIntegral + error).coerceIn(-AUTOPILOT_MAX_I, AUTOPILOT_MAX_I)
+        val derivative = error - autopilotLastError
+        autopilotLastError = error
+        
+        val output = (error * _apKp.value) + (autopilotIntegral * _apKi.value) + (derivative * _apKd.value)
+        
+        // Convert PID output to steer value (-STEER_MAX to STEER_MAX)
+        // Adjust polarity if needed: Positive output should steer Right (+) to increase heading
+        setSteerValue(output.toInt())
     }
 
-    private fun stopLoops() {
+    fun setApKp(kp: Float) {
+        _apKp.value = kp
+        prefs.edit().putFloat(KEY_AP_KP, kp).apply()
+    }
+
+    fun setApKi(ki: Float) {
+        _apKi.value = ki
+        prefs.edit().putFloat(KEY_AP_KI, ki).apply()
+    }
+
+    fun setApKd(kd: Float) {
+        _apKd.value = kd
+        prefs.edit().putFloat(KEY_AP_KD, kd).apply()
+    }
+
+    fun setApGains(kp: Float, ki: Float, kd: Float) {
+        _apKp.value = kp
+        _apKi.value = ki
+        _apKd.value = kd
+        prefs.edit()
+            .putFloat(KEY_AP_KP, kp)
+            .putFloat(KEY_AP_KI, ki)
+            .putFloat(KEY_AP_KD, kd)
+            .apply()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
         stopThrottleLoop()
         stopStatusQueryLoop()
         stopSensorReadLoop()
         stopAutoAdjustment()
         stopSteerRepeat()
         stopAutoPilotLoop()
-        _autoPilotActive.value = false
-        resetSteerJob?.cancel()
+        stopGpsUpdates()
+        tts?.shutdown()
+    }
+    
+    // Byte reading helpers for BLE GPS
+    private fun readS32LE(data: ByteArray, offset: Int): Int {
+        if (offset + 3 >= data.size) return 0
+        return (data[offset].toInt() and 0xFF) or
+                ((data[offset + 1].toInt() and 0xFF) shl 8) or
+                ((data[offset + 2].toInt() and 0xFF) shl 16) or
+                ((data[offset + 3].toInt() and 0xFF) shl 24)
     }
 
-    private fun startThrottleLoop() {
-        throttleJob?.cancel()
-        throttleJob = viewModelScope.launch {
-            while (true) {
-                if (motorConnectionState.value == TorqeedoBleManager.ConnectionState.CONNECTED) {
-                    motorManager.sendDrive(currentSpeed.value)
-                }
-                delay(_throttleDelay.value)
-            }
-        }
-    }
-
-    private fun stopThrottleLoop() {
-        throttleJob?.cancel()
-        throttleJob = null
-        motorManager.sendDrive(0)
-    }
-
-    private fun startStatusQueryLoop() {
-        statusQueryJob?.cancel()
-        statusQueryJob = viewModelScope.launch {
-            while (true) {
-                if (motorConnectionState.value == TorqeedoBleManager.ConnectionState.CONNECTED) {
-                    motorManager.sendStatusQuery()
-                }
-                delay(STATUS_QUERY_DELAY)
-            }
-        }
-    }
-
-    private fun stopStatusQueryLoop() {
-        statusQueryJob?.cancel()
-        statusQueryJob = null
-    }
-
-    private fun startSensorReadLoop() {
-        sensorReadJob?.cancel()
-        sensorReadJob = viewModelScope.launch {
-            while (true) {
-                if (motorConnectionState.value == TorqeedoBleManager.ConnectionState.CONNECTED) {
-                    motorManager.readCurrentSensor()
-                }
-                delay(SENSOR_READ_DELAY)
-            }
-        }
-    }
-
-    private fun stopSensorReadLoop() {
-        sensorReadJob?.cancel()
-        sensorReadJob = null
-    }
-
-    override fun onCleared() {
-        super.onCleared()
+    private fun readU16LE(data: ByteArray, offset: Int): Int {
+        if (offset + 1 >= data.size) return 0
+        return (data[offset].toInt() and 0xFF) or
+                ((data[offset + 1].toInt() and 0xFF) shl 8)
     }
 }

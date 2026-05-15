@@ -48,6 +48,15 @@
             android:layout_marginEnd="8dp" />
 
         <TextView
+            android:id="@+id/tvGpsStatusTop"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="GPS: Off"
+            android:textColor="@color/text_secondary"
+            android:textSize="11sp"
+            android:layout_marginEnd="8dp" />
+
+        <TextView
             android:id="@+id/tvConnectionStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -161,6 +170,14 @@
             android:layout_width="match_parent"
             android:layout_height="48dp"
             android:text="Scan for Remote"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btnScanGps"
+            style="@style/Widget.TorqeedoController.Button.Secondary"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="Scan for GPS"
             android:layout_marginBottom="8dp" />
 
         <Button
