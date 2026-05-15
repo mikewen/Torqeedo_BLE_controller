@@ -45,6 +45,7 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         private const val SENSOR_HEADER: Byte = 0xA5.toByte()
         private const val WIT_HEADER: Byte = 0x55.toByte()
         private const val GPS_HEADER: Byte = 0xA3.toByte()
+        private const val STEER_SENSOR_HEADER: Byte = 0xA8.toByte()
     }
 
     private var ae10Char: BluetoothGattCharacteristic? = null
@@ -138,6 +139,9 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
     private val _bleGpsData = MutableSharedFlow<ByteArray>(replay = 1)
     val bleGpsData: SharedFlow<ByteArray> = _bleGpsData.asSharedFlow()
 
+    private val _steerSensorData = MutableSharedFlow<TorqeedoProtocol.SteerSensorData>(replay = 1)
+    val steerSensorData: SharedFlow<TorqeedoProtocol.SteerSensorData> = _steerSensorData.asSharedFlow()
+
     private val _rawStatusFlow = MutableSharedFlow<ByteArray>(replay = 1)
     val rawStatusFlow: SharedFlow<ByteArray> = _rawStatusFlow.asSharedFlow()
 
@@ -196,8 +200,9 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
             val idxA5 = rxBuffer.indexOf(SENSOR_HEADER)
             val idx55 = rxBuffer.indexOf(WIT_HEADER)
             val idxA3 = rxBuffer.indexOf(GPS_HEADER)
+            val idxA8 = rxBuffer.indexOf(STEER_SENSOR_HEADER)
 
-            val startIdx = listOf(idxAC, idxA5, idx55, idxA3).filter { it != -1 }.minOrNull() ?: -1
+            val startIdx = listOf(idxAC, idxA5, idx55, idxA3, idxA8).filter { it != -1 }.minOrNull() ?: -1
 
             if (startIdx == -1) {
                 if (rxBuffer.size > 1024) rxBuffer.clear()
@@ -267,6 +272,24 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                         return
                     }
                 }
+                STEER_SENSOR_HEADER -> {
+                    // Steer sensor packet is 7 bytes: [0xA8, S1L, S1H, S2L, S2H, VCCL, VCCH]
+                    if (rxBuffer.size >= 7) {
+                        val frame = rxBuffer.take(7).toByteArray()
+                        repeat(7) { rxBuffer.removeAt(0) }
+                        
+                        TorqeedoProtocol.parseSteerSensor(frame)?.let { data ->
+                            _steerSensorData.tryEmit(data)
+                        }
+
+                        if (isRawDataEnabled) {
+                            logToFile("RECV_STEER_SENSOR", frame)
+                            _rawStatusFlow.tryEmit(frame)
+                        }
+                    } else {
+                        return
+                    }
+                }
                 else -> {
                     // TQ Bus logic (0xAC)
                     var frameEndIdx = -1
@@ -275,7 +298,8 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                             rxBuffer[i] == TorqeedoProtocol.FOOTER ||
                             rxBuffer[i] == SENSOR_HEADER ||
                             rxBuffer[i] == WIT_HEADER ||
-                            rxBuffer[i] == GPS_HEADER) {
+                            rxBuffer[i] == GPS_HEADER ||
+                            rxBuffer[i] == STEER_SENSOR_HEADER) {
                             frameEndIdx = i
                             break
                         }

@@ -14,6 +14,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.location.*
 import com.torqeedo.controller.ble.*
+import com.torqeedo.controller.protocol.SteerSensorProcessor
 import com.torqeedo.controller.protocol.TorqeedoProtocol
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -45,6 +46,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         private const val KEY_DECLINATION = "declination"
         private const val KEY_HEADING_OFFSET = "heading_offset"
 
+        private const val KEY_BIAS1 = "steer_bias1"
+        private const val KEY_BIAS2 = "steer_bias2"
+
         const val SPEED_MAX = 1000
         const val SPEED_MIN = 0
         
@@ -62,7 +66,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
         private const val AUTOPILOT_DELAY = 200L         // 5 Hz autopilot loop
         private const val KEY_AP_KP = "ap_kp"
-        private const val KEY_AP_KI = "ap_ki"
+        private const val KEY_AP_KI = "ap_KI"
         private const val KEY_AP_KD = "ap_kd"
         
         private const val DEFAULT_AP_KP = 2.5f
@@ -153,6 +157,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     val magY: StateFlow<Int> = _magY.asStateFlow()
     private val _magZ = MutableStateFlow(0)
     val magZ: StateFlow<Int> = _magZ.asStateFlow()
+
+    // New Steer Sensor Position
+    private val steerProcessor = SteerSensorProcessor()
+    private val _steerSensorA = MutableStateFlow(0)
+    val steerSensorA: StateFlow<Int> = _steerSensorA.asStateFlow()
+    private val _steerSensorB = MutableStateFlow(0)
+    val steerSensorB: StateFlow<Int> = _steerSensorB.asStateFlow()
+    private val _steerSensorAngle = MutableStateFlow(0f)
+    val steerSensorAngle: StateFlow<Float> = _steerSensorAngle.asStateFlow()
 
     // WitMotion IMU Data
     private val _witRoll = MutableStateFlow(0f)
@@ -268,6 +281,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         setupRemote()
         setupConnectionHandlers()
         setupMagnetometer()
+        setupSteerSensor()
         setupWitMotion()
         setupBleGps()
         setupAutoCalibration()
@@ -279,6 +293,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         imuManager.setLoggingEnabled(_enableLogging.value)
         gpsManager.setRawDataEnabled(_showRawData.value)
         gpsManager.setLoggingEnabled(_enableLogging.value)
+
+        // Load Steer Sensor Biases
+        steerProcessor.bias1 = prefs.getInt(KEY_BIAS1, SteerSensorProcessor.DEFAULT_BIAS)
+        steerProcessor.bias2 = prefs.getInt(KEY_BIAS2, SteerSensorProcessor.DEFAULT_BIAS)
 
         // Auto-reconnect to remote if we have a saved MAC
         if (!remote.isConnected) {
@@ -440,6 +458,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     _magY.value = yUnsigned - 524288
                     _magZ.value = zUnsigned - 524288
                 }
+            }
+        }
+    }
+
+    private fun setupSteerSensor() {
+        viewModelScope.launch {
+            motorManager.steerSensorData.collect { data ->
+                _steerSensorA.value = data.sensorA
+                _steerSensorB.value = data.sensorB
+                _steerSensorAngle.value = steerProcessor.calculateAngle(data.sensorA, data.sensorB)
             }
         }
     }
@@ -736,6 +764,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         _calibStbd.value = currentY
         prefs.edit().putInt(KEY_CALIB_STBD, currentY).apply()
         speak("Starboard max set")
+    }
+
+    fun calibrateSteerBias() {
+        val b1 = _steerSensorA.value
+        val b2 = _steerSensorB.value
+        steerProcessor.bias1 = b1
+        steerProcessor.bias2 = b2
+        prefs.edit()
+            .putInt(KEY_BIAS1, b1)
+            .putInt(KEY_BIAS2, b2)
+            .apply()
+        speak("Steer sensor bias calibrated")
     }
 
     fun startImuGyroCalibration() {

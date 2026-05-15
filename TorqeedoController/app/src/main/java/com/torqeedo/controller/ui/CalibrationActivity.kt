@@ -31,6 +31,11 @@ class CalibrationActivity : AppCompatActivity() {
             finish()
         }
 
+        binding.btnCalibHallBias.setOnClickListener {
+            vm.calibrateSteerBias()
+            showSnack("Steer sensor bias calibrated")
+        }
+
         binding.btnCalibZero.setOnClickListener {
             vm.calibrateZero()
             showSnack("Zero position calibrated")
@@ -63,6 +68,17 @@ class CalibrationActivity : AppCompatActivity() {
     private fun observeState() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    vm.steerSensorA.collectLatest { a -> binding.tvHallA.text = "A: $a" }
+                }
+                launch {
+                    vm.steerSensorB.collectLatest { b -> binding.tvHallB.text = "B: $b" }
+                }
+                launch {
+                    vm.steerSensorAngle.collectLatest { angle ->
+                        binding.tvHallAngle.text = "Angle: %.1f°".format(angle)
+                    }
+                }
                 launch {
                     vm.magX.collectLatest { x -> binding.tvMagX.text = "X: $x" }
                 }

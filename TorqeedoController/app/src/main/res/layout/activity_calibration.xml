@@ -48,7 +48,7 @@
             android:orientation="vertical"
             android:padding="16dp">
 
-            <!-- Rudder Calibration Card (Moved from MainActivity) -->
+            <!-- Hall Steer Sensor Card -->
             <androidx.cardview.widget.CardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -66,7 +66,67 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Steering POSITION CALIBRATION"
+                        android:text="HALL STEER SENSOR"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp"
+                        android:letterSpacing="0.1"
+                        android:layout_marginBottom="12dp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="12dp">
+
+                        <TextView android:id="@+id/tvHallA"
+                            android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:text="A: 0"
+                            android:textColor="@color/text_primary" android:textSize="12sp" />
+                        <TextView android:id="@+id/tvHallB"
+                            android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:text="B: 0"
+                            android:textColor="@color/text_primary" android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tvHallAngle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Angle: 0.0°"
+                        android:textColor="@color/accent_primary"
+                        android:textSize="24sp"
+                        android:gravity="center"
+                        android:fontFamily="sans-serif-medium"
+                        android:layout_marginBottom="24dp" />
+
+                    <Button
+                        android:id="@+id/btnCalibHallBias"
+                        style="@style/Widget.TorqeedoController.Button.Secondary"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Calibrate BIAS (Remove Magnet)" />
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- Rudder Calibration Card (MMC5603) -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardBackgroundColor="@color/bg_surface"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="0dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="MAG STEERING POSITION"
                         android:textColor="@color/text_secondary"
                         android:textSize="12sp"
                         android:letterSpacing="0.1"

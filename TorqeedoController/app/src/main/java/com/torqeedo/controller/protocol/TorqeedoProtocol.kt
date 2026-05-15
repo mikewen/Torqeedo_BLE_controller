@@ -426,4 +426,31 @@ object TorqeedoProtocol {
     private fun u16(hi: Byte, lo: Byte): Int {
         return ((hi.toInt() and 0xFF) shl 8) or (lo.toInt() and 0xFF)
     }
+
+    private fun u16le(lo: Byte, hi: Byte): Int {
+        return (lo.toInt() and 0xFF) or ((hi.toInt() and 0xFF) shl 8)
+    }
+
+    /**
+     * Parses the new steering sensor frame (7 bytes starting with 0xA8)
+     */
+    fun parseSteerSensor(frame: ByteArray): SteerSensorData? {
+        if (frame.size < 7 || (frame[0].toInt() and 0xFF) != 0xA8) return null
+        
+        val sensorA = u16le(frame[1], frame[2])
+        val sensorB = u16le(frame[3], frame[4])
+        val vcc = u16le(frame[5], frame[6])
+        
+        return SteerSensorData(sensorA, sensorB, vcc, frame)
+    }
+
+    /**
+     * Data model for the new steer position sensor (0xA8)
+     */
+    data class SteerSensorData(
+        val sensorA: Int,
+        val sensorB: Int,
+        val vcc: Int,
+        val rawBytes: ByteArray
+    )
 }
