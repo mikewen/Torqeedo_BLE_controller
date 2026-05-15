@@ -102,8 +102,23 @@ class AE03Callbacks : public NimBLECharacteristicCallbacks
         char dir = d[1];
         uint8_t pwm = d[2];
 
+        // Combine the two 8-bit bytes into a 16-bit runtime integer
         uint16_t runtime = d[3] | (d[4] << 8);
 
+        // OPTION A OVERRIDE & STOP CHECK: 
+        // If runtime is 0, it means an intentional Stop command was issued.
+        // If runtime is greater than 0, we still stop the previous cycle 
+        // to reset the H-Bridge lines safely before running the new command.
+        motorStop(); 
+
+        if (runtime == 0)
+        {
+            Serial.println("[BLE COMMAND] Intentional Motor Stop via AE03");
+            return; // Exit early since motor is now safely stopped
+        }
+
+        // Apply new overriding command parameters instantly
+        delayMicroseconds(10); // Tiny safety dead-time gap for H-bridge MOSFET stability
         motorDrive(dir, pwm);
         motorStopTime = millis() + runtime;
     }
@@ -155,6 +170,7 @@ void motorDrive(char dir, uint8_t pwm)
 
 void motorStop()
 {
+    motorStopTime = 0;
     ledcWrite(PIN_MOTOR_L, 0);
     ledcWrite(PIN_MOTOR_R, 0);
 }

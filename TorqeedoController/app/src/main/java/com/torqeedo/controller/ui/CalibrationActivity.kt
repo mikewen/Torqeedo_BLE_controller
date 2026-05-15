@@ -33,9 +33,20 @@ class CalibrationActivity : AppCompatActivity() {
 
         binding.btnCalibHallBias.setOnClickListener {
             vm.calibrateSteerBias()
-            showSnack("Steer sensor bias calibrated")
         }
 
+        // Manual Hall Calibration
+        binding.btnSetCenter.setOnClickListener { vm.setSteerCalibCenter() }
+        binding.btnSetPort22.setOnClickListener { vm.setSteerCalibPort22() }
+        binding.btnSetPort35.setOnClickListener { vm.setSteerCalibPort35() }
+        binding.btnSetStbd22.setOnClickListener { vm.setSteerCalibStbd22() }
+        binding.btnSetStbd35.setOnClickListener { vm.setSteerCalibStbd35() }
+
+        // Auto Hall Calibration
+        binding.btnAutoCalibPort.setOnClickListener { vm.autoCalibPort() }
+        binding.btnAutoCalibStbd.setOnClickListener { vm.autoCalibStbd() }
+
+        // Legacy/Mag Rudder Calibration
         binding.btnCalibZero.setOnClickListener {
             vm.calibrateZero()
             showSnack("Zero position calibrated")
@@ -73,6 +84,9 @@ class CalibrationActivity : AppCompatActivity() {
                 }
                 launch {
                     vm.steerSensorB.collectLatest { b -> binding.tvHallB.text = "B: $b" }
+                }
+                launch {
+                    vm.steerSensorRatio.collectLatest { r -> binding.tvHallRatio.text = "R: %.3f".format(r) }
                 }
                 launch {
                     vm.steerSensorAngle.collectLatest { angle ->

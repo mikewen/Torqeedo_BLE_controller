@@ -48,6 +48,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
         private const val KEY_BIAS1 = "steer_bias1"
         private const val KEY_BIAS2 = "steer_bias2"
+        
+        private const val KEY_RATIO_CENTER = "ratio_center"
+        private const val KEY_RATIO_PORT22 = "ratio_port22"
+        private const val KEY_RATIO_PORT35 = "ratio_port35"
+        private const val KEY_RATIO_STBD22 = "ratio_stbd22"
+        private const val KEY_RATIO_STBD35 = "ratio_stbd35"
+        private const val KEY_STEER_LUT = "steer_lut_data"
 
         const val SPEED_MAX = 1000
         const val SPEED_MIN = 0
@@ -166,6 +173,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     val steerSensorB: StateFlow<Int> = _steerSensorB.asStateFlow()
     private val _steerSensorAngle = MutableStateFlow(0f)
     val steerSensorAngle: StateFlow<Float> = _steerSensorAngle.asStateFlow()
+
+    val steerSensorRatio: StateFlow<Float> = combine(_steerSensorA, _steerSensorB) { a, b ->
+        steerProcessor.getRatio(a, b)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
 
     // WitMotion IMU Data
     private val _witRoll = MutableStateFlow(0f)
@@ -297,6 +308,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         // Load Steer Sensor Biases
         steerProcessor.bias1 = prefs.getInt(KEY_BIAS1, SteerSensorProcessor.DEFAULT_BIAS)
         steerProcessor.bias2 = prefs.getInt(KEY_BIAS2, SteerSensorProcessor.DEFAULT_BIAS)
+        
+        loadSteerLutData()
 
         // Auto-reconnect to remote if we have a saved MAC
         if (!remote.isConnected) {
@@ -776,6 +789,210 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             .putInt(KEY_BIAS2, b2)
             .apply()
         speak("Steer sensor bias calibrated")
+    }
+
+    // New Steer Calibration methods
+    fun setSteerCalibCenter() {
+        val r = steerSensorRatio.value
+        prefs.edit().putFloat(KEY_RATIO_CENTER, r).apply()
+        recalculateAndSaveLut()
+        speak("Center zero calibrated")
+    }
+
+    fun setSteerCalibPort22() {
+        val r = steerSensorRatio.value
+        prefs.edit().putFloat(KEY_RATIO_PORT22, r).apply()
+        recalculateAndSaveLut()
+        speak("Port 22.5 calibrated")
+    }
+
+    fun setSteerCalibPort35() {
+        val r = steerSensorRatio.value
+        prefs.edit().putFloat(KEY_RATIO_PORT35, r).apply()
+        recalculateAndSaveLut()
+        speak("Port 35 calibrated")
+    }
+
+    fun setSteerCalibStbd22() {
+        val r = steerSensorRatio.value
+        prefs.edit().putFloat(KEY_RATIO_STBD22, r).apply()
+        recalculateAndSaveLut()
+        speak("Starboard 22.5 calibrated")
+    }
+
+    fun setSteerCalibStbd35() {
+        val r = steerSensorRatio.value
+        prefs.edit().putFloat(KEY_RATIO_STBD35, r).apply()
+        recalculateAndSaveLut()
+        speak("Starboard 35 calibrated")
+    }
+
+    private fun recalculateAndSaveLut() {
+        val points = getManualPoints()
+        if (points.size >= 2) {
+            steerProcessor.fillTableFromPoints(points)
+            saveSteerLutData()
+        }
+    }
+
+    private fun loadSteerLutData() {
+        val lutStr = prefs.getString(KEY_STEER_LUT, null)
+        if (lutStr != null) {
+            try {
+                val ratios = lutStr.split(",").map { it.toFloat() }.toFloatArray()
+                if (ratios.size == SteerSensorProcessor.TABLE_SIZE) {
+                    steerProcessor.updateTable(ratios)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load LUT data", e)
+            }
+        } else {
+            recalculateAndSaveLut()
+        }
+    }
+
+    private fun saveSteerLutData() {
+        val ratios = steerProcessor.getRatioTable()
+        val lutStr = ratios.joinToString(",") { "%.6f".format(it) }
+        prefs.edit().putString(KEY_STEER_LUT, lutStr).apply()
+    }
+
+    fun autoCalibPort() {
+        viewModelScope.launch {
+            speak("Auto calibrate port started")
+            val targetRatio = prefs.getFloat(KEY_RATIO_PORT22, -1000f)
+            if (targetRatio == -1000f) {
+                speak("Error: Port 22 point not set")
+                return@launch
+            }
+
+            moveToAngle(0f)
+            delay(1000)
+            
+            val startTime = System.currentTimeMillis()
+            val sampledPoints = mutableListOf<Pair<Long, Float>>()
+            sampledPoints.add(0L to steerSensorRatio.value)
+
+            var timedOut = false
+            val timeout = 15000L 
+            
+            val driveJob = launch {
+                while (true) {
+                    adjustSteer(-1) 
+                    delay(50)
+                }
+            }
+
+            val startRatio = steerSensorRatio.value
+            val isDecreasing = targetRatio < startRatio
+
+            while (true) {
+                val currentRatio = steerSensorRatio.value
+                sampledPoints.add((System.currentTimeMillis() - startTime) to currentRatio)
+                val reached = if (isDecreasing) currentRatio <= targetRatio else currentRatio >= targetRatio
+                if (reached) break
+                if (System.currentTimeMillis() - startTime > timeout) {
+                    timedOut = true
+                    break
+                }
+                delay(50)
+            }
+            driveJob.cancel()
+            
+            if (!timedOut) {
+                val totalTime = System.currentTimeMillis() - startTime
+                speak("Reached 22.5 degrees. Updating LUT.")
+                val timedPoints = sampledPoints.map { (time, ratio) ->
+                    val angle = -(time.toFloat() / totalTime.toFloat()) * 22.5f
+                    ratio to angle
+                }
+                val manualPoints = getManualPoints()
+                steerProcessor.fillTableFromPoints(manualPoints + timedPoints)
+                saveSteerLutData()
+            } else {
+                speak("Timed out")
+            }
+        }
+    }
+
+    fun autoCalibStbd() {
+        viewModelScope.launch {
+            speak("Auto calibrate starboard started")
+            val targetRatio = prefs.getFloat(KEY_RATIO_STBD22, -1000f)
+            if (targetRatio == -1000f) {
+                speak("Error: Stbd 22 point not set")
+                return@launch
+            }
+
+            moveToAngle(0f)
+            delay(1000)
+            
+            val startTime = System.currentTimeMillis()
+            val sampledPoints = mutableListOf<Pair<Long, Float>>()
+            sampledPoints.add(0L to steerSensorRatio.value)
+
+            var timedOut = false
+            val timeout = 15000L
+            
+            val driveJob = launch {
+                while (true) {
+                    adjustSteer(1)
+                    delay(50)
+                }
+            }
+
+            val startRatio = steerSensorRatio.value
+            val isDecreasing = targetRatio < startRatio
+
+            while (true) {
+                val currentRatio = steerSensorRatio.value
+                sampledPoints.add((System.currentTimeMillis() - startTime) to currentRatio)
+                val reached = if (isDecreasing) currentRatio <= targetRatio else currentRatio >= targetRatio
+                if (reached) break
+                if (System.currentTimeMillis() - startTime > timeout) {
+                    timedOut = true
+                    break
+                }
+                delay(50)
+            }
+            driveJob.cancel()
+            
+            if (!timedOut) {
+                val totalTime = System.currentTimeMillis() - startTime
+                speak("Reached 22.5 degrees. Updating LUT.")
+                val timedPoints = sampledPoints.map { (time, ratio) ->
+                    val angle = (time.toFloat() / totalTime.toFloat()) * 22.5f
+                    ratio to angle
+                }
+                val manualPoints = getManualPoints()
+                steerProcessor.fillTableFromPoints(manualPoints + timedPoints)
+                saveSteerLutData()
+            } else {
+                speak("Timed out")
+            }
+        }
+    }
+
+    private fun getManualPoints(): List<Pair<Float, Float>> {
+        val points = mutableListOf<Pair<Float, Float>>()
+        if (prefs.contains(KEY_RATIO_CENTER)) points.add(prefs.getFloat(KEY_RATIO_CENTER, 0f) to 0f)
+        if (prefs.contains(KEY_RATIO_PORT22)) points.add(prefs.getFloat(KEY_RATIO_PORT22, 0f) to -22.5f)
+        if (prefs.contains(KEY_RATIO_PORT35)) points.add(prefs.getFloat(KEY_RATIO_PORT35, 0f) to -35f)
+        if (prefs.contains(KEY_RATIO_STBD22)) points.add(prefs.getFloat(KEY_RATIO_STBD22, 0f) to 22.5f)
+        if (prefs.contains(KEY_RATIO_STBD35)) points.add(prefs.getFloat(KEY_RATIO_STBD35, 0f) to 35f)
+        return points
+    }
+
+    private suspend fun moveToAngle(targetAngle: Float) {
+        val timeout = 5000L
+        val start = System.currentTimeMillis()
+        while (abs(steerSensorAngle.value - targetAngle) > 1.5f) {
+            val diff = targetAngle - steerSensorAngle.value
+            val step = if (diff > 0) 1 else -1
+            adjustSteer(step)
+            if (System.currentTimeMillis() - start > timeout) break
+            delay(100)
+        }
     }
 
     fun startImuGyroCalibration() {
