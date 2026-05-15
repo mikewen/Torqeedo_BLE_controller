@@ -329,12 +329,17 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
     }
 
     fun sendDrive(speed: Int) {
+        //if (ae10Char == null) {
+        //    Log.e("BLE_ERROR", "CRITICAL: ae10Char is NULL! Write aborted.")
+        //}
+
         val char = ae10Char ?: return
         val frame = TorqeedoProtocol.buildDrive(speed)
         logToFile("SEND_DRIVE", frame)
+        //Log.d("SEND_DRIVE", "Send data to AE10")
         writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue()
     }
-    
+
     fun sendSteer(value: Int, runtimeMs: Int = 0) {
         val char = ae03Char ?: return
         val dir = if (value < 0) 'L' else 'R'

@@ -266,7 +266,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     init {
         setupRemote()
-        setupConnectionVoice()
+        setupConnectionHandlers()
         setupMagnetometer()
         setupWitMotion()
         setupBleGps()
@@ -388,12 +388,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
-    private fun setupConnectionVoice() {
+    private fun setupConnectionHandlers() {
         viewModelScope.launch {
             motorConnectionState.collect { state ->
                 when (state) {
-                    TorqeedoBleManager.ConnectionState.CONNECTED -> speak("Motor connected")
-                    TorqeedoBleManager.ConnectionState.DISCONNECTED -> speak("Motor disconnected")
+                    TorqeedoBleManager.ConnectionState.CONNECTED -> {
+                        speak("Motor connected")
+                        startThrottleLoop()
+                        startStatusQueryLoop()
+                        startSensorReadLoop()
+                    }
+                    TorqeedoBleManager.ConnectionState.DISCONNECTED -> {
+                        speak("Motor disconnected")
+                        stopThrottleLoop()
+                        stopStatusQueryLoop()
+                        stopSensorReadLoop()
+                    }
                     else -> {}
                 }
             }
