@@ -1,46 +1,34 @@
 /*
-    ESP32 Rudder Feedback + Linear Motor Controller (NimBLE Stream Optimized)
-    --------------------------------------------------------------------------
-    Features:
-    - High-frequency 200ms-500ms streaming safe
-    - Read 2x ES491UA analog Hall sensors
-    - BLE service 0xAE30
-    - AE02 = notify raw sensor packets
-    - AE03 = motor command write
-    - AE10 = status read/write (Optimized for No-Response streaming)
+ESP32 QMC6308 Magnetometer + Linear Motor Controller (NimBLE, 8-Byte Packets)
+-----------------------------------------------------------------------------
+Features:
+- QMC6308 16-bit magnetometer via I2C (SDA=18, SCL=19)
+- BLE service 0xAE30, 8-byte notify packets on AE02
+- AE03 = motor command write, AE10 = RS485 passthrough
+- GPIO5 set to HIGH drive state
 */
+#include <NimBLEDevice.h>
+#include <Wire.h>
 
-#include <NimBLEDevice.h> // Using NimBLE for fast, non-blocking GATT streaming
-
-HardwareSerial DebugUart(2);    //Send to UART-RS485
-
-typedef struct
-{
-    float filtered;
-} adc_filter_t;
-
-adc_filter_t filtA;
-adc_filter_t filtB;
-adc_filter_t filtVcc;
+HardwareSerial DebugUart(2);
 
 // =====================================================
-// GPIO
+// GPIO & I2C
 // =====================================================
-#define RS485_TX    21
-#define RS485_RX    19 
-
-#define PIN_SENSOR_A   34
-#define PIN_SENSOR_B   35
-#define PIN_VCC_SENSE  36
-
+#define RS485_TX       21
+#define RS485_RX       17        // Changed from 19 to avoid SCL conflict
+#define PIN_I2C_SDA    18
+#define PIN_I2C_SCL    19
+#define PIN_HIGH_DRIVE 5
 #define PIN_MOTOR_L    22
 #define PIN_MOTOR_R    23
 
 // =====================================================
-// PWM
+// QMC6308 Registers
 // =====================================================
-//#define PWM_FREQ       2000
-//#define PWM_RESOLUTION 8
+#define QMC6308_ADDR   0x2C
+#define REG_CTRL       0x0A
+#define DATA_X_LSB     0x01
 
 // =====================================================
 // BLE UUIDs
@@ -55,289 +43,197 @@ adc_filter_t filtVcc;
 // =====================================================
 NimBLECharacteristic *charAE02;
 NimBLECharacteristic *charAE10;
-
 volatile bool bleConnected = false;
 volatile uint32_t motorStopTime = 0;
 
-// Forward Declarations
 void motorStop();
-//void motorDrive(char dir, uint8_t pwm);
 void motorDrive(char dir);
 
 // =====================================================
-// BLE Server Callbacks (Corrected NimBLE 2.x Signature)
+// BLE Server Callbacks
 // =====================================================
-class ServerCallbacks : public NimBLEServerCallbacks
-{
-    // FIX: Removed 'const', using 'NimBLEConnInfo&' reference directly
-    void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override
-    {
+class ServerCallbacks : public NimBLEServerCallbacks {
+    void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
         bleConnected = true;
-        // Force fast BLE connection interval: 7.5ms min, 15ms max, 0 latency, 400ms timeout
         pServer->updateConnParams(connInfo.getConnHandle(), 6, 12, 0, 400);
     }
-
-    // FIX: Removed 'const', using 'NimBLEConnInfo&' reference directly
-    void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override
-    {
+    void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
         bleConnected = false;
         pServer->startAdvertising();
     }
 };
 
 // =====================================================
-// AE03 Write Callback (Corrected NimBLE 2.x Signature)
+// AE03 Write Callback
 // =====================================================
-class AE03Callbacks : public NimBLECharacteristicCallbacks
-{
-    // FIX: Removed 'const', using 'NimBLEConnInfo&' reference directly
-    void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo& connInfo) override
-    {
-        //std::string value = pCharacteristic->getValue();
-        // Use reference to avoid heap allocation on every command
+class AE03Callbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo& connInfo) override {
         const std::string& value = pCharacteristic->getValue();
-
-        //Serial.printf("[NIMBLE STREAM] AE03 len=%d\n", value.length());
-
-        if(value.length() != 5)
-            return;
-
+        if(value.length() != 5) return;
         const uint8_t *d = (const uint8_t*)value.data();
         if(d[0] != 's') return;
-
         char dir = d[1];
-        //uint8_t pwm = d[2];
-
-        // Combine the two 8-bit bytes into a 16-bit runtime integer
         uint16_t runtime = d[3] | (d[4] << 8);
-
-        // OPTION A OVERRIDE & STOP CHECK: 
-        // If runtime is 0, it means an intentional Stop command was issued.
-        // If runtime is greater than 0, we still stop the previous cycle 
-        // to reset the H-Bridge lines safely before running the new command.
-        motorStop(); 
-
-        if (runtime == 0)
-        {
-            Serial.println("[BLE COMMAND] Intentional Motor Stop via AE03");
-            return; // Exit early since motor is now safely stopped
+        motorStop();
+        if (runtime == 0) {
+            Serial.println("[BLE CMD] Intentional Stop via AE03");
+            return;
         }
-
-        // Apply new overriding command parameters instantly
-        delayMicroseconds(10); // Tiny safety dead-time gap for H-bridge MOSFET stability
-        //motorDrive(dir, pwm);
+        delayMicroseconds(10);
         motorDrive(dir);
         motorStopTime = millis() + runtime;
     }
 };
 
 // =====================================================
-// AE10 Status Callback (Corrected NimBLE 2.x Signature)
+// AE10 Status Callback
 // =====================================================
-class AE10Callbacks : public NimBLECharacteristicCallbacks
-{
-    void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo& connInfo) override
-    {
-        // Zero-copy: reference avoids heap allocation on every packet
+class AE10Callbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo& connInfo) override {
         const std::string& value = pCharacteristic->getValue();
-        size_t len = value.length();
-        if (len == 0) return;
-
-        // Direct binary forward to RS485
-        DebugUart.write((const uint8_t*)value.data(), len);
+        if (value.length() == 0) return;
+        DebugUart.write((const uint8_t*)value.data(), value.length());
     }
 };
 
 // =====================================================
-// Motor Control Execution
+// Motor Control
 // =====================================================
-/*
-void motorDrive(char dir, uint8_t pwm)
-{
-    pwm = constrain(pwm, 0, 255);
-
-    if(dir == 'L')
-    {
-        ledcWrite(PIN_MOTOR_L, pwm);
-        ledcWrite(PIN_MOTOR_R, 0);
-    }
-    else if(dir == 'R')
-    {
-        ledcWrite(PIN_MOTOR_L, 0);
-        ledcWrite(PIN_MOTOR_R, pwm);
-    }
-    else
-    {
-        motorStop();
-    }
-}
-
-void motorStop()
-{
-    motorStopTime = 0;
-    ledcWrite(PIN_MOTOR_L, 0);
-    ledcWrite(PIN_MOTOR_R, 0);
-}
-*/
-
-void motorDrive(char dir)
-{
-    if(dir == 'L')
-    {
+void motorDrive(char dir) {
+    if(dir == 'L') {
         digitalWrite(PIN_MOTOR_L, HIGH);
         digitalWrite(PIN_MOTOR_R, LOW);
-    }
-    else if(dir == 'R')
-    {
+    } else if(dir == 'R') {
         digitalWrite(PIN_MOTOR_L, LOW);
         digitalWrite(PIN_MOTOR_R, HIGH);
-    }
-    else
-    {
+    } else {
         motorStop();
     }
 }
-
-void motorStop()
-{
+void motorStop() {
     motorStopTime = 0;
-
     digitalWrite(PIN_MOTOR_L, LOW);
     digitalWrite(PIN_MOTOR_R, LOW);
 }
 
 // =====================================================
-// ADC Filter Logic
+// QMC6308 Init & Read
 // =====================================================
-uint16_t readADCFiltered(uint8_t pin, adc_filter_t *f)
-{
-    const int N = 32;
-    uint16_t minv = 65535;
-    uint16_t maxv = 0;
-    uint32_t sum = 0;
-
-    for(int i = 0; i < N; i++)
-    {
-        uint16_t v = analogRead(pin);
-        sum += v;
-        if(v < minv) minv = v;
-        if(v > maxv) maxv = v;
-    }
-
-    sum -= minv;
-    sum -= maxv;
-    float avg = sum / (float)(N - 2);
-
-    const float alpha = 0.15f;
-    f->filtered = f->filtered * (1.0f - alpha) + avg * alpha;
-
-    return (uint16_t)f->filtered;
+void initQMC6308() {
+    // Configure: Continuous mode, 80Hz ODR
+    Wire.beginTransmission(QMC6308_ADDR);
+    Wire.write(REG_CTRL);
+    Wire.write(0xC1);  // Bit 7: Continuous, Bit 6-5: 80Hz, Bit 0: Normal
+    int err = Wire.endTransmission();
+    Serial.printf("[QMC6308] Init Reg 0x0A: %s (err=%d)\n", err == 0 ? "OK" : "FAIL", err);
+    delay(20);
 }
 
-// =====================================================
-// Send Sensor Packet
-// =====================================================
-void sendSensorPacket()
-{
-    uint16_t a = readADCFiltered(PIN_SENSOR_A, &filtA);
-    uint16_t b = readADCFiltered(PIN_SENSOR_B, &filtB);
-    uint16_t vcc = readADCFiltered(PIN_VCC_SENSE, &filtVcc);
+void sendSensorPacket() {
+    // Read 6 bytes starting from 0x01 (X LSB)
+    Wire.beginTransmission(QMC6308_ADDR);
+    Wire.write(DATA_X_LSB);
+    int err = Wire.endTransmission(false);
+    if (err != 0) {
+        Serial.printf("[I2C FAIL] Tx: err=%d\n", err);
+        return;
+    }
+    
+    int available = Wire.requestFrom(QMC6308_ADDR, 6);
+    if (available != 6) {
+        Serial.printf("[I2C FAIL] Rx: got %d/6\n", available);
+        return;
+    }
 
-    uint8_t pkt[7];
-    pkt[0] = 0xA8;
-    pkt[1] = a & 0xFF;
-    pkt[2] = (a >> 8) & 0xFF;
-    pkt[3] = b & 0xFF;
-    pkt[4] = (b >> 8) & 0xFF;
-    pkt[5] = vcc & 0xFF;
-    pkt[6] = (vcc >> 8) & 0xFF;
+    // Parse little-endian 16-bit signed values
+    int16_t raw_x = Wire.read() | (Wire.read() << 8);
+    int16_t raw_y = Wire.read() | (Wire.read() << 8);
+    int16_t raw_z = Wire.read() | (Wire.read() << 8);
 
-    charAE02->setValue(pkt, sizeof(pkt));
-    charAE02->notify();
+    // DEBUG: Print raw values
+    Serial.printf("[QMC6308] X=%d Y=%d Z=%d\n", raw_x, raw_y, raw_z);
+
+    // Pack 8-byte BLE packet:
+    // [0] Header, [1] Seq, [2-3] X, [4-5] Y, [6-7] Z
+    static uint8_t packetSeq = 0;
+    uint8_t pkt[8];
+    pkt[0] = 0xA5;                    // Header
+    pkt[1] = packetSeq++;             // Sequence
+    pkt[2] = raw_x & 0xFF;            // X LSB
+    pkt[3] = (raw_x >> 8) & 0xFF;     // X MSB
+    pkt[4] = raw_y & 0xFF;            // Y LSB
+    pkt[5] = (raw_y >> 8) & 0xFF;     // Y MSB
+    pkt[6] = raw_z & 0xFF;            // Z LSB
+    pkt[7] = (raw_z >> 8) & 0xFF;     // Z MSB
+
+    if(charAE02) {
+        charAE02->setValue(pkt, sizeof(pkt));
+        charAE02->notify();
+    }
 }
 
 // =====================================================
 // Setup
 // =====================================================
-void setup()
-{
+void setup() {
     DebugUart.begin(19200, SERIAL_8N1, RS485_RX, RS485_TX);
     Serial.begin(115200);
+    delay(1000);
+    Serial.println("=== ESP32 QMC6308 Boot ===");
 
-    // ADC Setup
-    analogReadResolution(12);
-    analogSetWidth(12);
-    analogSetPinAttenuation(PIN_SENSOR_A, ADC_6db);
-    analogSetPinAttenuation(PIN_SENSOR_B, ADC_6db);
-    analogSetPinAttenuation(PIN_VCC_SENSE, ADC_11db);
+    // I2C Initialization
+    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
+    initQMC6308();
 
-    // PWM Setup
-    //ledcAttach(PIN_MOTOR_L, PWM_FREQ, PWM_RESOLUTION);
-    //ledcAttach(PIN_MOTOR_R, PWM_FREQ, PWM_RESOLUTION);
+    // GPIO5 High Drive
+    pinMode(PIN_HIGH_DRIVE, OUTPUT);
+    digitalWrite(PIN_HIGH_DRIVE, HIGH);
+
+    // Motor Pins
     pinMode(PIN_MOTOR_L, OUTPUT);
     pinMode(PIN_MOTOR_R, OUTPUT);
     motorStop();
 
-    // Init NimBLE Device Profile
-    NimBLEDevice::init("Steer_UART"); // Forced name change to clear Android local GATT cache
-
-
+    // NimBLE Setup
+    NimBLEDevice::init("Steer_UART");
     NimBLEServer *server = NimBLEDevice::createServer();
     server->setCallbacks(new ServerCallbacks());
 
     NimBLEService *service = server->createService(SERVICE_UUID);
 
-    // AE02 Notify (NimBLE auto-handles 2002 descriptor allocation internally)
-    charAE02 = service->createCharacteristic(
-        CHAR_AE02_UUID,
-        NIMBLE_PROPERTY::NOTIFY
-    );
+    charAE02 = service->createCharacteristic(CHAR_AE02_UUID, NIMBLE_PROPERTY::NOTIFY);
 
-    // AE03 Write Only Control Loop
     NimBLECharacteristic *charAE03 = service->createCharacteristic(
-        CHAR_AE03_UUID,
-        NIMBLE_PROPERTY::WRITE_NR
-    );
+        CHAR_AE03_UUID, NIMBLE_PROPERTY::WRITE_NR);
     charAE03->setCallbacks(new AE03Callbacks());
 
-    // AE10 Deep Stream Control (Enforces clean NO_RESPONSE maps)
     charAE10 = service->createCharacteristic(
-        CHAR_AE10_UUID,
-        NIMBLE_PROPERTY::READ |
-        NIMBLE_PROPERTY::WRITE_NR
-    );
+        CHAR_AE10_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE_NR);
     charAE10->setCallbacks(new AE10Callbacks());
 
     service->start();
 
     NimBLEAdvertising *advertising = NimBLEDevice::getAdvertising();
-    
-    advertising->setName("Steer_UART"); 
-    advertising->enableScanResponse(true); 
+    advertising->setName("Steer_UART");
+    advertising->enableScanResponse(true);
     advertising->addServiceUUID(SERVICE_UUID);
-    
-    // Start broadcasting over the air
     advertising->start();
 
-    Serial.println("NimBLE High-Speed Stack Active!");
+    Serial.println("[BLE] Advertising Started");
 }
 
 // =====================================================
 // Main Loop
 // =====================================================
-void loop()
-{
-    // Motor timeout protector
-    if(motorStopTime > 0 && millis() > motorStopTime)
-    {
+void loop() {
+    if(motorStopTime > 0 && millis() > motorStopTime) {
         motorStop();
         motorStopTime = 0;
     }
 
-    // Non-blocking sensor streaming (5Hz , 200ms)
     static uint32_t lastSensorTime = 0;
-    if(bleConnected && (millis() - lastSensorTime >= 200))  
-    {
+    // ~20Hz streaming (50ms interval)
+    if(bleConnected && (millis() - lastSensorTime >= 50)) {
         lastSensorTime = millis();
         sendSensorPacket();
     }

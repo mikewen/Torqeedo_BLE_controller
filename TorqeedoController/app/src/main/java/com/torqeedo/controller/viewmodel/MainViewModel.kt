@@ -176,7 +176,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private val _steerValue = MutableStateFlow(0)
     val steerValue: StateFlow<Int> = _steerValue.asStateFlow()
 
-    // Magnetometer / Rudder Position (MMC5603 on motor)
+    // Magnetometer / Rudder Position (MMC5603 or QMC6308 on motor)
     private val _magX = MutableStateFlow(0)
     val magX: StateFlow<Int> = _magX.asStateFlow()
     private val _magY = MutableStateFlow(0)
@@ -348,6 +348,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         setupRemote()
         setupConnectionHandlers()
         setupMagnetometer()
+        setupQmc6308()
         setupSteerSensor()
         setupWitMotion()
         setupBleGps()
@@ -518,7 +519,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private fun setupMagnetometer() {
         viewModelScope.launch {
             motorManager.magnetometerData.collect { bytes ->
-                if (bytes.size >= 8) {
+                if (bytes.size >= 9) {
                     // MMC5603 20-bit data unpacking
                     val xUnsigned = ((bytes[0].toInt() and 0xFF) shl 12) or ((bytes[1].toInt() and 0xFF) shl 4) or (bytes[6].toInt() and 0x0F)
                     val yUnsigned = ((bytes[2].toInt() and 0xFF) shl 12) or ((bytes[3].toInt() and 0xFF) shl 4) or (bytes[7].toInt() and 0x0F)
@@ -530,6 +531,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     if (_isMagCalibrating.value) {
                         magCalibrator.addSample(_magX.value.toFloat(), _magY.value.toFloat())
                     }
+                }
+            }
+        }
+    }
+
+    private fun setupQmc6308() {
+        viewModelScope.launch {
+            motorManager.qmc6308Data.collect { data ->
+                _magX.value = data.x
+                _magY.value = data.y
+                _magZ.value = data.z
+                
+                if (_isMagCalibrating.value) {
+                    magCalibrator.addSample(data.x.toFloat(), data.y.toFloat())
                 }
             }
         }
@@ -1220,7 +1235,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             val next = _speedMagnitude.value - _speedStep.value
             if (next < 0) {
                 _direction.value = Direction.REVERSE
-                _speedMagnitude.value = -next
+                _speedMagnitude.value = next
             } else {
                 _speedMagnitude.value = next
             }

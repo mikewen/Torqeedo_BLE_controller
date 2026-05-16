@@ -211,7 +211,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="MAG STEERING POSITION (MMC5603)"
+                        android:text="MAG STEERING POSITION (MMC5603 / QMC6308)"
                         android:textColor="@color/text_secondary"
                         android:textSize="12sp"
                         android:letterSpacing="0.1"

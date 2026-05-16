@@ -431,6 +431,8 @@ object TorqeedoProtocol {
         return (lo.toInt() and 0xFF) or ((hi.toInt() and 0xFF) shl 8)
     }
 
+    private fun s16le(lo: Byte, hi: Byte): Int = u16le(lo, hi).toShort().toInt()
+
     /**
      * Parses the new steering sensor frame (7 bytes starting with 0xA8)
      */
@@ -445,12 +447,34 @@ object TorqeedoProtocol {
     }
 
     /**
+     * Parses the QMC6308 sensor frame (8 bytes starting with 0xA5)
+     * [0] Header 0xA5, [1] Seq, [2-3] X, [4-5] Y, [6-7] Z
+     */
+    fun parseQmc6308(frame: ByteArray): QMC6308Data? {
+        if (frame.size < 8 || (frame[0].toInt() and 0xFF) != 0xA5) return null
+        val x = s16le(frame[2], frame[3])
+        val y = s16le(frame[4], frame[5])
+        val z = s16le(frame[6], frame[7])
+        return QMC6308Data(x, y, z, frame)
+    }
+
+    /**
      * Data model for the new steer position sensor (0xA8)
      */
     data class SteerSensorData(
         val sensorA: Int,
         val sensorB: Int,
         val vcc: Int,
+        val rawBytes: ByteArray
+    )
+
+    /**
+     * Data model for the QMC6308 sensor (0xA5)
+     */
+    data class QMC6308Data(
+        val x: Int,
+        val y: Int,
+        val z: Int,
         val rawBytes: ByteArray
     )
 }

@@ -8,12 +8,14 @@ This project implements the **TQ Bus protocol** (proprietary RS485-based protoco
 *   **Wireless Throttle**: Control speed and direction over Bluetooth with a 500ms safety hardware watchdog.
 *   **Digital Steering**: Integrated steering control with precise incremental steps and center reset.
 *   **2D Vector Steering Feedback**: High-resolution support for dual linear Hall position sensors using a **2D Vector Path Interpolation Engine**. This handles the non-monotonic "decreasing ratio" problem that occurs when a magnet passes directly over a sensor in a 45-degree geometry.
+*   **MMC5603 Magnetometer Support**: High-precision steering position using an MMC5603 sensor with **Least-Squares Ellipse Fitting** to compensate for hard-iron and soft-iron distortions.
 *   **Dual-Stage Smoothing**: Real-time Low Pass Filtering (LPF) applied to raw ADC inputs and the final calculated angle to ensure a stable display in high-vibration marine environments.
 *   **Signal Quality Monitoring**: Automatic magnitude gating (`MIN_MAGNITUDE`) to lock the steering angle and ignore noise when the magnet is removed or too far from sensors.
 *   **Integrated Autopilot**: Maintain a target heading automatically using a PID controller (requires WitMotion heading sensor).
 *   **Advanced Calibration Suite**: 
     *   **BIAS Correction**: Record baseline voltages with the magnet removed to eliminate sensor offset.
     *   **2D Vector Mapping**: Manually map Center (0°), Port (22.5°/35°), and Starboard (22.5°/35°) reference points in vector space.
+    *   **MMC5603 Ellipse Fit**: Geometric calibration that fits a least-squares ellipse to magnetic data, normalizing it to a perfect unit circle for linear angular feedback.
     *   **Auto-Run Sweep**: Automated calibration routine that returns the motor to center and performs a timed sweep to generate a high-resolution 128-point 2D path arc.
 *   **Manual Actuator Control**: Direct buttons in the UI to drive the linear steering motor for setup and positioning.
 *   **Real-time Telemetry**: Monitor Motor RPM, Temperature (°C), **Battery Current (Amps)**, and **Steering Angle**.
@@ -22,6 +24,27 @@ This project implements the **TQ Bus protocol** (proprietary RS485-based protoco
 *   **Voice Feedback**: Text-to-speech prompts for status changes, throttle adjustments, and calibration milestones.
 *   **Configurable Steering Pulse**: Adjust steering motor runtime (ms) per step via UI to match your actuator's speed.
 *   **Persistent Settings**: "Raw Data", "Logging", "Voice Prompts", and "Steer Scale" preferences are saved automatically.
+
+## MMC5603 Magnetometer Calibration (Ellipse Fit)
+
+### Changes Implemented
+The MMC5603 steering position logic was upgraded from a simple 1D Y-axis mapping to a 2D geometric fit:
+1.  **Algebraic Distance Minimization**: Implements a least-squares fitter for the ellipse equation $Ax^2 + Bxy + Cy^2 + Dx + Ey + F = 0$.
+2.  **Normalization Engine**: Translates raw (X, Y) magnetic coordinates to the ellipse center, rotates to align with principal axes, and scales to a unit circle.
+3.  **Angular Mapping**: Converts normalized coordinates to a linear 0-360° magnetic heading, which is then mapped to rudder percentage.
+4.  **Hybrid Fallback**: The system automatically uses high-precision ellipse data if a valid calibration is saved, otherwise falling back to legacy 1D Y-axis mode.
+
+### How to use
+To calibrate the MMC5603 Magnetometer:
+1.  Navigate to the **Calibration** screen.
+2.  In the **MMC5603** section, tap **Start**.
+3.  Physically move the rudder/motor through its **full range** of motion (Port to Starboard several times).
+4.  Tap **Stop & Fit**. The app will calculate the optimal geometric ellipse.
+5.  If the "Steering" percentage responds smoothly as you move the rudder, tap **Save**.
+6.  **Set the Physical Zero**:
+    *   Align the motor/shaft to the exact physical center (straight ahead).
+    *   Tap the **Zero** button in the **Physical Mapping** section. This anchors the 0% position to the current magnetic angle.
+7.  **Set Max Limits**: Move to full Port and tap **Port Max**, then full Starboard and tap **Stbd Max**.
 
 ## Hardware Setup
 The app communicates with an **AC6328** BLE-UART bridge connected to the motor's RS485 lines and steering sensors.
@@ -76,6 +99,24 @@ The bridge sends Hall sensor data via notifications on `0xAE02` at ~20Hz:
 | 3-4 | Sensor B | u16LE | Raw ADC reading from Hall Sensor B |
 | 5-6 | VCC | u16LE | Bridge supply voltage (for compensation) |
 
+### MMC5603 Magnetometer Data Protocol (11-byte)
+The bridge sends 20-bit magnetometer data via notifications on `0xAE02`:
+| Byte | Field | Description |
+| :--- | :--- | :--- |
+| 0 | Header | 0xA5 |
+| 1 | Sequence | Packet sequence number |
+| 2 | X High | X-axis bits [19:12] |
+| 3 | X Mid | X-axis bits [11:4] |
+| 4 | Y High | Y-axis bits [19:12] |
+| 5 | Y Mid | Y-axis bits [11:4] |
+| 6 | Z High | Z-axis bits [19:12] |
+| 7 | Z Mid | Z-axis bits [11:4] |
+| 8 | X Low | X-axis bits [3:0] (low nibble) |
+| 9 | Y Low | Y-axis bits [3:0] (low nibble) |
+| 10 | Z Low | Z-axis bits [3:0] (low nibble) |
+
+**Note**: Raw 20-bit values are unsigned ($0$ to $2^{20}-1$). The app subtracts $2^{19}$ ($524288$) to obtain signed values.
+
 ### Sensor Logic: 2D Vector Path Engine
 The steering system uses two linear Hall sensors placed at 45 degrees. Conventional ratio-based logic fails when the magnet passes a sensor. This engine:
 1.  Filters noisy raw ADC signals via a Stage 1 Low Pass Filter.
@@ -110,6 +151,7 @@ To ensure accurate positioning across the full range of movement:
 | **Telemetry Card** | Displays RPM, Course, SOG (Knots), **Amps**, **Watts**, and **Steer Position**. |
 | **Manual Drive** | Hold buttons in the calibration screen to drive the linear motor left/right. |
 | **Auto Port/Stbd** | Triggers the automated path-mapping routine. |
+| **Ellipse Fit Buttons** | **Start/Stop/Save/Clear** buttons for MMC5603 magnetic calibration. |
 | **Ratio & Magnitude** | Real-time display of vector signal quality to verify hardware placement. |
 | **Autopilot** | Enable automatic heading hold. Target heading can be adjusted in real-time. |
 | **Autopilot Toggle** | Enable automatic heading hold. PID gains (Kp, Ki, Kd) are configurable via the UI. |

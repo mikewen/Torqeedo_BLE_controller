@@ -42,7 +42,8 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         val SERVICE_WIT_UUID: UUID = UUID.fromString("0000ffe0-0000-1000-8000-00805f9b34fb")
         val CHAR_WIT_UUID: UUID    = UUID.fromString("0000ffe1-0000-1000-8000-00805f9b34fb")
 
-        private const val SENSOR_HEADER: Byte = 0xA5.toByte()
+        private const val MMC5603_HEADER: Byte = 0xA5.toByte() // Note: 0xA5 was used for MMC5603 (11 bytes), now also used for QMC6308 (8 bytes)
+        private const val QMC6308_HEADER: Byte = 0xA5.toByte()
         private const val WIT_HEADER: Byte = 0x55.toByte()
         private const val GPS_HEADER: Byte = 0xA3.toByte()
         private const val STEER_SENSOR_HEADER: Byte = 0xA8.toByte()
@@ -133,6 +134,9 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
     private val _magnetometerData = MutableSharedFlow<ByteArray>(replay = 1)
     val magnetometerData: SharedFlow<ByteArray> = _magnetometerData.asSharedFlow()
 
+    private val _qmc6308Data = MutableSharedFlow<TorqeedoProtocol.QMC6308Data>(replay = 1)
+    val qmc6308Data: SharedFlow<TorqeedoProtocol.QMC6308Data> = _qmc6308Data.asSharedFlow()
+
     private val _witMotionData = MutableSharedFlow<ByteArray>(replay = 1)
     val witMotionData: SharedFlow<ByteArray> = _witMotionData.asSharedFlow()
 
@@ -197,7 +201,7 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
     private fun processBuffer() {
         while (rxBuffer.isNotEmpty()) {
             val idxAC = rxBuffer.indexOf(TorqeedoProtocol.HEADER)
-            val idxA5 = rxBuffer.indexOf(SENSOR_HEADER)
+            val idxA5 = rxBuffer.indexOf(QMC6308_HEADER)
             val idx55 = rxBuffer.indexOf(WIT_HEADER)
             val idxA3 = rxBuffer.indexOf(GPS_HEADER)
             val idxA8 = rxBuffer.indexOf(STEER_SENSOR_HEADER)
@@ -216,17 +220,61 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
             val header = rxBuffer[0]
 
             when (header) {
-                SENSOR_HEADER -> {
-                    // Sensor packet is 11 bytes: [0xA5, SEQ, DATA x 9]
+                QMC6308_HEADER -> {
+                    // QMC6308 is 8 bytes, MMC5603 is 11 bytes. Both start with 0xA5.
+                    // We can try to peek and see if we have enough for 11, or if it looks like an 8-byte packet.
+                    // Given the request specifically says 8-byte BLE packet for QMC6308:
                     if (rxBuffer.size >= 11) {
-                        val frame = rxBuffer.take(11).toByteArray()
-                        repeat(11) { rxBuffer.removeAt(0) }
+                        // Check if it's potentially an 11-byte MMC5603 packet
+                        // (Usually MMC5603 has specific ranges, but here we prioritize QMC6308 if it's 8 bytes)
+                        // Actually, if we have at least 8 bytes, we can try parsing as QMC.
+                        // If we have 11 bytes, we might have an MMC packet.
+                        // Let's look at the next header to decide if it was 8 or 11.
+                        
+                        var packetLen = 8
+                        if (rxBuffer.size > 8) {
+                            val nextHeader = rxBuffer[8]
+                            if (nextHeader != TorqeedoProtocol.HEADER && 
+                                nextHeader != QMC6308_HEADER && 
+                                nextHeader != WIT_HEADER && 
+                                nextHeader != GPS_HEADER && 
+                                nextHeader != STEER_SENSOR_HEADER) {
+                                // If 9th byte is not a header, maybe it's the 11-byte MMC packet
+                                packetLen = 11
+                            }
+                        }
 
-                        val rawMagData = frame.copyOfRange(2, 11)
-                        _magnetometerData.tryEmit(rawMagData)
-
+                        if (packetLen == 11 && rxBuffer.size >= 11) {
+                            val frame = rxBuffer.take(11).toByteArray()
+                            repeat(11) { rxBuffer.removeAt(0) }
+                            val rawMagData = frame.copyOfRange(2, 11)
+                            _magnetometerData.tryEmit(rawMagData)
+                            if (isRawDataEnabled) {
+                                logToFile("RECV_MAG_MMC", frame)
+                                _rawStatusFlow.tryEmit(frame)
+                            }
+                        } else {
+                            // Parse as 8-byte QMC6308
+                            val frame = rxBuffer.take(8).toByteArray()
+                            repeat(8) { rxBuffer.removeAt(0) }
+                            TorqeedoProtocol.parseQmc6308(frame)?.let { data ->
+                                _qmc6308Data.tryEmit(data)
+                            }
+                            if (isRawDataEnabled) {
+                                logToFile("RECV_MAG_QMC", frame)
+                                _rawStatusFlow.tryEmit(frame)
+                            }
+                        }
+                    } else if (rxBuffer.size >= 8) {
+                        // If we only have between 8 and 10 bytes, it must be QMC (or we're waiting for MMC)
+                        // For now, assume QMC if we see 0xA5 and have 8 bytes.
+                        val frame = rxBuffer.take(8).toByteArray()
+                        repeat(8) { rxBuffer.removeAt(0) }
+                        TorqeedoProtocol.parseQmc6308(frame)?.let { data ->
+                            _qmc6308Data.tryEmit(data)
+                        }
                         if (isRawDataEnabled) {
-                            logToFile("RECV_MAG", frame)
+                            logToFile("RECV_MAG_QMC", frame)
                             _rawStatusFlow.tryEmit(frame)
                         }
                     } else {
@@ -296,7 +344,7 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                     for (i in 1 until rxBuffer.size) {
                         if (rxBuffer[i] == TorqeedoProtocol.HEADER ||
                             rxBuffer[i] == TorqeedoProtocol.FOOTER ||
-                            rxBuffer[i] == SENSOR_HEADER ||
+                            rxBuffer[i] == QMC6308_HEADER ||
                             rxBuffer[i] == WIT_HEADER ||
                             rxBuffer[i] == GPS_HEADER ||
                             rxBuffer[i] == STEER_SENSOR_HEADER) {
