@@ -193,7 +193,7 @@
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
-            <!-- Rudder Calibration Card (Legacy/MMC5603) -->
+            <!-- Rudder Calibration Card (MMC5603 Ellipse) -->
             <androidx.cardview.widget.CardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -246,7 +246,43 @@
                         android:textSize="24sp"
                         android:gravity="center"
                         android:fontFamily="sans-serif-medium"
-                        android:layout_marginBottom="24dp" />
+                        android:layout_marginBottom="16dp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Ellipse Calibration"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="10sp"
+                        android:layout_marginBottom="4dp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="8dp">
+                        <Button android:id="@+id/btnStartMagEllipse" style="@style/Widget.TorqeedoController.Button.Secondary"
+                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                            android:text="Start" android:layout_marginEnd="4dp" />
+                        <Button android:id="@+id/btnStopMagEllipse" style="@style/Widget.TorqeedoController.Button.Secondary"
+                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                            android:text="Stop &amp; Fit" android:layout_marginEnd="4dp" />
+                        <Button android:id="@+id/btnSaveMagEllipse" style="@style/Widget.TorqeedoController.Button.Primary"
+                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                            android:text="Save" />
+                    </LinearLayout>
+
+                    <Button android:id="@+id/btnClearMagEllipse" style="@style/Widget.TorqeedoController.Button.Secondary"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:text="Clear Ellipse Data" android:layout_marginBottom="16dp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Physical Mapping (Set Rudder then click)"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="10sp"
+                        android:layout_marginBottom="4dp" />
 
                     <LinearLayout
                         android:layout_width="match_parent"

@@ -14,6 +14,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.gms.location.*
 import com.torqeedo.controller.ble.*
+import com.torqeedo.controller.protocol.MagEllipseCalibrator
 import com.torqeedo.controller.protocol.SteerSensorProcessor
 import com.torqeedo.controller.protocol.TorqeedoProtocol
 import kotlinx.coroutines.Job
@@ -21,9 +22,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.Locale
-import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.sqrt
+import kotlin.math.*
 
 class MainViewModel(application: Application) : AndroidViewModel(application), TextToSpeech.OnInitListener {
 
@@ -50,6 +49,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         private const val KEY_BIAS1 = "steer_bias1"
         private const val KEY_BIAS2 = "steer_bias2"
         
+        // Mag Ellipse Calibration
+        private const val KEY_MAG_ELLIPSE_CX = "mag_ellipse_cx"
+        private const val KEY_MAG_ELLIPSE_CY = "mag_ellipse_cy"
+        private const val KEY_MAG_ELLIPSE_A = "mag_ellipse_a"
+        private const val KEY_MAG_ELLIPSE_B = "mag_ellipse_b"
+        private const val KEY_MAG_ELLIPSE_ANGLE = "mag_ellipse_angle"
+        private const val KEY_MAG_ELLIPSE_VALID = "mag_ellipse_valid"
+        private const val KEY_MAG_CALIB_ZERO_DEG = "mag_calib_zero_deg"
+        private const val KEY_MAG_CALIB_PORT_DEG = "mag_calib_port_deg"
+        private const val KEY_MAG_CALIB_STBD_DEG = "mag_calib_stbd_deg"
+
         // 2D Vector Calibration Points (A, B)
         private const val KEY_VEC_A_CENTER = "vec_a_center"
         private const val KEY_VEC_B_CENTER = "vec_b_center"
@@ -174,6 +184,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private val _magZ = MutableStateFlow(0)
     val magZ: StateFlow<Int> = _magZ.asStateFlow()
 
+    private val magCalibrator = MagEllipseCalibrator()
+    private val _magEllipseResult = MutableStateFlow<MagEllipseCalibrator.Result?>(loadMagEllipse())
+    val magEllipseResult = _magEllipseResult.asStateFlow()
+    private val _isMagCalibrating = MutableStateFlow(false)
+    val isMagCalibrating = _isMagCalibrating.asStateFlow()
+
+    private val _magCalibZeroDeg = MutableStateFlow(prefs.getFloat(KEY_MAG_CALIB_ZERO_DEG, 0f))
+    private val _magCalibPortDeg = MutableStateFlow(prefs.getFloat(KEY_MAG_CALIB_PORT_DEG, 0f))
+    private val _magCalibStbdDeg = MutableStateFlow(prefs.getFloat(KEY_MAG_CALIB_STBD_DEG, 0f))
+
     // New Steer Sensor Position
     private val steerProcessor = SteerSensorProcessor()
     private val _steerSensorA = MutableStateFlow(0)
@@ -230,23 +250,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private val _calibPort = MutableStateFlow(prefs.getInt(KEY_CALIB_PORT, 0))
     private val _calibStbd = MutableStateFlow(prefs.getInt(KEY_CALIB_STBD, 0))
 
-    val rudderPosition = combine(_magY, _calibZero, _calibPort, _calibStbd) { y, zero, port, stbd ->
-        val diff = (y - zero).toFloat()
-        if (abs(diff) < 1f) return@combine 0f
-        
-        val portRange = (port - zero).toFloat()
-        val stbdRange = (stbd - zero).toFloat()
-        
-        val pos = when {
-            abs(portRange) > 10 && (diff / portRange) > 0 -> {
-                (diff / portRange) * -100f
+    // Helper flows for rudderPosition to avoid combine overloads limit
+    private val magInputFlow = combine(_magX, _magY, _magEllipseResult) { x, y, res -> Triple(x, y, res) }
+    private val legacyCalibFlow = combine(_calibZero, _calibPort, _calibStbd) { zero, port, stbd -> Triple(zero, port, stbd) }
+    private val ellipseCalibFlow = combine(_magCalibZeroDeg, _magCalibPortDeg, _magCalibStbdDeg) { z, p, s -> Triple(z, p, s) }
+
+    val rudderPosition = combine(magInputFlow, legacyCalibFlow, ellipseCalibFlow) { mag, legacy, ellipseCal ->
+        val (x, y, res) = mag
+        val (zero, port, stbd) = legacy
+        val (zeroDeg, portDeg, stbdDeg) = ellipseCal
+
+        if (res != null) {
+            val norm = magCalibrator.normalize(x.toFloat(), y.toFloat(), res)
+            val angle = Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
+            
+            fun diffAngle(a: Float, b: Float): Float {
+                var d = a - b
+                while (d > 180) d -= 360f
+                while (d < -180) d += 360f
+                return d
             }
-            abs(stbdRange) > 10 && (diff / stbdRange) > 0 -> {
-                (diff / stbdRange) * 100f
+            
+            val diff = diffAngle(angle, zeroDeg)
+            val portRange = diffAngle(portDeg, zeroDeg)
+            val stbdRange = diffAngle(stbdDeg, zeroDeg)
+            
+            val pos = when {
+                abs(portRange) > 1 && (diff / portRange) > 0 -> (diff / portRange) * -100f
+                abs(stbdRange) > 1 && (diff / stbdRange) > 0 -> (diff / stbdRange) * 100f
+                else -> 0f
             }
-            else -> 0f
+            pos.coerceIn(-100f, 100f)
+        } else {
+            // Legacy 1D Y-axis method
+            val diff = (y - zero).toFloat()
+            if (abs(diff) < 1f) return@combine 0f
+            val portRange = (port - zero).toFloat()
+            val stbdRange = (stbd - zero).toFloat()
+            val pos = when {
+                abs(portRange) > 10 && (diff / portRange) > 0 -> (diff / portRange) * -100f
+                abs(stbdRange) > 10 && (diff / stbdRange) > 0 -> (diff / stbdRange) * 100f
+                else -> 0f
+            }
+            pos.coerceIn(-100f, 100f)
         }
-        pos.coerceIn(-100f, 100f)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
 
     // IMU Calibration State
@@ -479,6 +526,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     _magX.value = xUnsigned - 524288
                     _magY.value = yUnsigned - 524288
                     _magZ.value = zUnsigned - 524288
+                    
+                    if (_isMagCalibrating.value) {
+                        magCalibrator.addSample(_magX.value.toFloat(), _magY.value.toFloat())
+                    }
                 }
             }
         }
@@ -767,24 +818,95 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     }
 
     // ── Calibration ───────────────────────────────────────────────────────
+    private fun loadMagEllipse(): MagEllipseCalibrator.Result? {
+        if (!prefs.getBoolean(KEY_MAG_ELLIPSE_VALID, false)) return null
+        return MagEllipseCalibrator.Result(
+            prefs.getFloat(KEY_MAG_ELLIPSE_CX, 0f),
+            prefs.getFloat(KEY_MAG_ELLIPSE_CY, 0f),
+            prefs.getFloat(KEY_MAG_ELLIPSE_A, 1f),
+            prefs.getFloat(KEY_MAG_ELLIPSE_B, 1f),
+            prefs.getFloat(KEY_MAG_ELLIPSE_ANGLE, 0f)
+        )
+    }
+
+    fun startMagEllipseCalib() {
+        magCalibrator.clear()
+        _isMagCalibrating.value = true
+        speak("Magnetometer ellipse calibration started. Move rudder through full range.")
+    }
+
+    fun stopMagEllipseCalib() {
+        _isMagCalibrating.value = false
+        val res = magCalibrator.fit()
+        if (res != null) {
+            _magEllipseResult.value = res
+            speak("Ellipse fit successful")
+        } else {
+            speak("Ellipse fit failed. Not enough data or bad geometry.")
+        }
+    }
+
+    fun saveMagEllipseCalib() {
+        val res = _magEllipseResult.value ?: return
+        prefs.edit()
+            .putFloat(KEY_MAG_ELLIPSE_CX, res.centerX)
+            .putFloat(KEY_MAG_ELLIPSE_CY, res.centerY)
+            .putFloat(KEY_MAG_ELLIPSE_A, res.axisA)
+            .putFloat(KEY_MAG_ELLIPSE_B, res.axisB)
+            .putFloat(KEY_MAG_ELLIPSE_ANGLE, res.angle)
+            .putBoolean(KEY_MAG_ELLIPSE_VALID, true)
+            .apply()
+        speak("Ellipse calibration saved")
+    }
+
+    fun clearMagEllipseCalib() {
+        _magEllipseResult.value = null
+        prefs.edit().remove(KEY_MAG_ELLIPSE_VALID).apply()
+        speak("Ellipse calibration cleared")
+    }
+
     fun calibrateZero() {
-        val currentY = _magY.value
-        _calibZero.value = currentY
-        prefs.edit().putInt(KEY_CALIB_ZERO, currentY).apply()
+        val ellipse = _magEllipseResult.value
+        if (ellipse != null) {
+            val norm = magCalibrator.normalize(_magX.value.toFloat(), _magY.value.toFloat(), ellipse)
+            val deg = Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
+            _magCalibZeroDeg.value = deg
+            prefs.edit().putFloat(KEY_MAG_CALIB_ZERO_DEG, deg).apply()
+        } else {
+            val currentY = _magY.value
+            _calibZero.value = currentY
+            prefs.edit().putInt(KEY_CALIB_ZERO, currentY).apply()
+        }
         speak("Zero set")
     }
 
     fun calibratePort() {
-        val currentY = _magY.value
-        _calibPort.value = currentY
-        prefs.edit().putInt(KEY_CALIB_PORT, currentY).apply()
+        val ellipse = _magEllipseResult.value
+        if (ellipse != null) {
+            val norm = magCalibrator.normalize(_magX.value.toFloat(), _magY.value.toFloat(), ellipse)
+            val deg = Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
+            _magCalibPortDeg.value = deg
+            prefs.edit().putFloat(KEY_MAG_CALIB_PORT_DEG, deg).apply()
+        } else {
+            val currentY = _magY.value
+            _calibPort.value = currentY
+            prefs.edit().putInt(KEY_CALIB_PORT, currentY).apply()
+        }
         speak("Port max set")
     }
 
     fun calibrateStbd() {
-        val currentY = _magY.value
-        _calibStbd.value = currentY
-        prefs.edit().putInt(KEY_CALIB_STBD, currentY).apply()
+        val ellipse = _magEllipseResult.value
+        if (ellipse != null) {
+            val norm = magCalibrator.normalize(_magX.value.toFloat(), _magY.value.toFloat(), ellipse)
+            val deg = Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
+            _magCalibStbdDeg.value = deg
+            prefs.edit().putFloat(KEY_MAG_CALIB_STBD_DEG, deg).apply()
+        } else {
+            val currentY = _magY.value
+            _calibStbd.value = currentY
+            prefs.edit().putInt(KEY_CALIB_STBD, currentY).apply()
+        }
         speak("Starboard max set")
     }
 

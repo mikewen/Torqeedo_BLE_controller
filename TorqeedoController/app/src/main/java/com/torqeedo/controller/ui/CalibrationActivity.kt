@@ -79,6 +79,23 @@ class CalibrationActivity : AppCompatActivity() {
         binding.btnAutoCalibPort.setOnClickListener { vm.autoCalibPort() }
         binding.btnAutoCalibStbd.setOnClickListener { vm.autoCalibStbd() }
 
+        // Mag Ellipse Calibration
+        binding.btnStartMagEllipse.setOnClickListener {
+            vm.startMagEllipseCalib()
+            showSnack("Recording magnetic samples...")
+        }
+        binding.btnStopMagEllipse.setOnClickListener {
+            vm.stopMagEllipseCalib()
+        }
+        binding.btnSaveMagEllipse.setOnClickListener {
+            vm.saveMagEllipseCalib()
+            showSnack("Ellipse calibration saved")
+        }
+        binding.btnClearMagEllipse.setOnClickListener {
+            vm.clearMagEllipseCalib()
+            showSnack("Ellipse calibration cleared")
+        }
+
         // Legacy/Mag Rudder Calibration
         binding.btnCalibZero.setOnClickListener {
             vm.calibrateZero()
@@ -138,6 +155,17 @@ class CalibrationActivity : AppCompatActivity() {
                 launch {
                     vm.rudderPosition.collectLatest { pos ->
                         binding.tvRudderPos.text = "Rudder: %.1f%%".format(pos)
+                    }
+                }
+                launch {
+                    vm.isMagCalibrating.collectLatest { isCalibrating ->
+                        if (isCalibrating) {
+                            binding.btnStartMagEllipse.isEnabled = false
+                            binding.btnStopMagEllipse.isEnabled = true
+                        } else {
+                            binding.btnStartMagEllipse.isEnabled = true
+                            binding.btnStopMagEllipse.isEnabled = false
+                        }
                     }
                 }
                 launch {
