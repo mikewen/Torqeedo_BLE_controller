@@ -1,6 +1,7 @@
 package com.torqeedo.controller.ui
 
 import android.os.Bundle
+import android.view.MotionEvent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Lifecycle
@@ -29,6 +30,22 @@ class CalibrationActivity : AppCompatActivity() {
     private fun setupControls() {
         binding.btnBack.setOnClickListener {
             finish()
+        }
+
+        // Manual Drive Buttons (Hold to repeat)
+        binding.btnSteerLeft.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> vm.startSteerRepeat(-1)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> vm.stopSteerRepeat()
+            }
+            true
+        }
+        binding.btnSteerRight.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> vm.startSteerRepeat(1)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> vm.stopSteerRepeat()
+            }
+            true
         }
 
         binding.btnCalibHallBias.setOnClickListener {

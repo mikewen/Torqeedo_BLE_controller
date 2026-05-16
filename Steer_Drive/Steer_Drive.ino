@@ -26,6 +26,9 @@ adc_filter_t filtVcc;
 // =====================================================
 // GPIO
 // =====================================================
+#define RS485_TX    21
+#define RS485_RX    19 
+
 #define PIN_SENSOR_A   34
 #define PIN_SENSOR_B   35
 #define PIN_VCC_SENSE  36
@@ -36,8 +39,8 @@ adc_filter_t filtVcc;
 // =====================================================
 // PWM
 // =====================================================
-#define PWM_FREQ       2000
-#define PWM_RESOLUTION 8
+//#define PWM_FREQ       2000
+//#define PWM_RESOLUTION 8
 
 // =====================================================
 // BLE UUIDs
@@ -58,7 +61,8 @@ volatile uint32_t motorStopTime = 0;
 
 // Forward Declarations
 void motorStop();
-void motorDrive(char dir, uint8_t pwm);
+//void motorDrive(char dir, uint8_t pwm);
+void motorDrive(char dir);
 
 // =====================================================
 // BLE Server Callbacks (Corrected NimBLE 2.x Signature)
@@ -69,6 +73,8 @@ class ServerCallbacks : public NimBLEServerCallbacks
     void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override
     {
         bleConnected = true;
+        // Force fast BLE connection interval: 7.5ms min, 15ms max, 0 latency, 400ms timeout
+        pServer->updateConnParams(connInfo.getConnHandle(), 6, 12, 0, 400);
     }
 
     // FIX: Removed 'const', using 'NimBLEConnInfo&' reference directly
@@ -87,7 +93,9 @@ class AE03Callbacks : public NimBLECharacteristicCallbacks
     // FIX: Removed 'const', using 'NimBLEConnInfo&' reference directly
     void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo& connInfo) override
     {
-        std::string value = pCharacteristic->getValue();
+        //std::string value = pCharacteristic->getValue();
+        // Use reference to avoid heap allocation on every command
+        const std::string& value = pCharacteristic->getValue();
 
         //Serial.printf("[NIMBLE STREAM] AE03 len=%d\n", value.length());
 
@@ -95,12 +103,10 @@ class AE03Callbacks : public NimBLECharacteristicCallbacks
             return;
 
         const uint8_t *d = (const uint8_t*)value.data();
-
-        if(d[0] != 's')
-            return;
+        if(d[0] != 's') return;
 
         char dir = d[1];
-        uint8_t pwm = d[2];
+        //uint8_t pwm = d[2];
 
         // Combine the two 8-bit bytes into a 16-bit runtime integer
         uint16_t runtime = d[3] | (d[4] << 8);
@@ -119,7 +125,8 @@ class AE03Callbacks : public NimBLECharacteristicCallbacks
 
         // Apply new overriding command parameters instantly
         delayMicroseconds(10); // Tiny safety dead-time gap for H-bridge MOSFET stability
-        motorDrive(dir, pwm);
+        //motorDrive(dir, pwm);
+        motorDrive(dir);
         motorStopTime = millis() + runtime;
     }
 };
@@ -129,18 +136,14 @@ class AE03Callbacks : public NimBLECharacteristicCallbacks
 // =====================================================
 class AE10Callbacks : public NimBLECharacteristicCallbacks
 {
-    // FIX: Removed 'const', using 'NimBLEConnInfo&' reference directly
     void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo& connInfo) override
     {
-        std::string value = pCharacteristic->getValue();
+        // Zero-copy: reference avoids heap allocation on every packet
+        const std::string& value = pCharacteristic->getValue();
         size_t len = value.length();
+        if (len == 0) return;
 
-        //Serial.printf("[NIMBLE STREAM] AE10 len=%d\n", len);
-
-        if(len == 0)
-            return;
-
-        // Push directly to RS485
+        // Direct binary forward to RS485
         DebugUart.write((const uint8_t*)value.data(), len);
     }
 };
@@ -148,6 +151,7 @@ class AE10Callbacks : public NimBLECharacteristicCallbacks
 // =====================================================
 // Motor Control Execution
 // =====================================================
+/*
 void motorDrive(char dir, uint8_t pwm)
 {
     pwm = constrain(pwm, 0, 255);
@@ -173,6 +177,33 @@ void motorStop()
     motorStopTime = 0;
     ledcWrite(PIN_MOTOR_L, 0);
     ledcWrite(PIN_MOTOR_R, 0);
+}
+*/
+
+void motorDrive(char dir)
+{
+    if(dir == 'L')
+    {
+        digitalWrite(PIN_MOTOR_L, HIGH);
+        digitalWrite(PIN_MOTOR_R, LOW);
+    }
+    else if(dir == 'R')
+    {
+        digitalWrite(PIN_MOTOR_L, LOW);
+        digitalWrite(PIN_MOTOR_R, HIGH);
+    }
+    else
+    {
+        motorStop();
+    }
+}
+
+void motorStop()
+{
+    motorStopTime = 0;
+
+    digitalWrite(PIN_MOTOR_L, LOW);
+    digitalWrite(PIN_MOTOR_R, LOW);
 }
 
 // =====================================================
@@ -230,19 +261,21 @@ void sendSensorPacket()
 // =====================================================
 void setup()
 {
-    DebugUart.begin(19200, SERIAL_8N1, 26, 25);
+    DebugUart.begin(19200, SERIAL_8N1, RS485_RX, RS485_TX);
     Serial.begin(115200);
 
     // ADC Setup
     analogReadResolution(12);
     analogSetWidth(12);
-    analogSetPinAttenuation(PIN_SENSOR_A, ADC_11db);
-    analogSetPinAttenuation(PIN_SENSOR_B, ADC_11db);
+    analogSetPinAttenuation(PIN_SENSOR_A, ADC_6db);
+    analogSetPinAttenuation(PIN_SENSOR_B, ADC_6db);
     analogSetPinAttenuation(PIN_VCC_SENSE, ADC_11db);
 
     // PWM Setup
-    ledcAttach(PIN_MOTOR_L, PWM_FREQ, PWM_RESOLUTION);
-    ledcAttach(PIN_MOTOR_R, PWM_FREQ, PWM_RESOLUTION);
+    //ledcAttach(PIN_MOTOR_L, PWM_FREQ, PWM_RESOLUTION);
+    //ledcAttach(PIN_MOTOR_R, PWM_FREQ, PWM_RESOLUTION);
+    pinMode(PIN_MOTOR_L, OUTPUT);
+    pinMode(PIN_MOTOR_R, OUTPUT);
     motorStop();
 
     // Init NimBLE Device Profile
@@ -301,9 +334,11 @@ void loop()
         motorStopTime = 0;
     }
 
-    if(bleConnected)
+    // Non-blocking sensor streaming (5Hz , 200ms)
+    static uint32_t lastSensorTime = 0;
+    if(bleConnected && (millis() - lastSensorTime >= 200))  
     {
+        lastSensorTime = millis();
         sendSensorPacket();
-        delay(30); // Prevent sensor line saturation
     }
 }
