@@ -48,4 +48,7 @@ dependencies {
 
     // Coroutines
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+
+    // osmdroid for offline maps
+    implementation 'org.osmdroid:osmdroid-android:6.1.18'
 }

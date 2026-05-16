@@ -136,6 +136,51 @@
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
+            <!-- Navigation Card -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardBackgroundColor="@color/bg_surface"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="0dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="NAVIGATION"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="10sp"
+                        android:letterSpacing="0.1"
+                        android:layout_marginBottom="8dp"/>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnOpenMap"
+                        style="@style/Widget.TorqeedoController.Button.Secondary"
+                        android:layout_width="match_parent"
+                        android:layout_height="64dp"
+                        android:text="OPEN MAP PICKER"
+                        app:icon="@android:drawable/ic_dialog_map"
+                        app:iconGravity="textStart" />
+
+                    <TextView
+                        android:id="@+id/tvWaypointInfo"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="No target set"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="14sp"
+                        android:layout_marginTop="12dp"
+                        android:gravity="center"/>
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
             <!-- Heading Adjustment Controls -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -247,7 +292,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:max="50" />
+                            android:max="100" />
                         <EditText
                             android:id="@+id/etKp"
                             android:layout_width="60dp"
@@ -277,7 +322,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:max="50" />
+                            android:max="100" />
                         <EditText
                             android:id="@+id/etKi"
                             android:layout_width="60dp"
@@ -306,7 +351,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:max="50" />
+                            android:max="100" />
                         <EditText
                             android:id="@+id/etKd"
                             android:layout_width="60dp"

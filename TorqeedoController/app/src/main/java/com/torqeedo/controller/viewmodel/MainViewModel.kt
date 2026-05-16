@@ -21,6 +21,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import org.osmdroid.util.GeoPoint
 import java.util.Locale
 import kotlin.math.*
 
@@ -100,6 +101,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         private const val DEFAULT_AP_KI = 0.1f
         private const val DEFAULT_AP_KD = 1.0f
         private const val AUTOPILOT_MAX_I = 20f          // Max integral contribution
+
+        private const val KEY_WAYPOINTS = "waypoints"
     }
 
     private val prefs: SharedPreferences = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -312,6 +315,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     private val _gpsCourse = MutableStateFlow<Int?>(null)
     val gpsCourse: StateFlow<Int?> = _gpsCourse.asStateFlow()
+
+    private val _currentLocation = MutableStateFlow<GeoPoint?>(null)
+    val currentLocation: StateFlow<GeoPoint?> = _currentLocation.asStateFlow()
+
+    // Waypoints
+    private val _waypoints = MutableStateFlow<List<GeoPoint>>(loadWaypoints())
+    val waypoints: StateFlow<List<GeoPoint>> = _waypoints.asStateFlow()
+
+    private val _targetLocation = MutableStateFlow<GeoPoint?>(null)
+    val targetLocation: StateFlow<GeoPoint?> = _targetLocation.asStateFlow()
 
     // Auto-pilot state
     private val _autoPilotActive = MutableStateFlow(false)
@@ -634,6 +647,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 _gpsFix.value = true
                 _gpsSpeedKnots.value = speedKnots
                 _gpsCourse.value = course
+                _currentLocation.value = GeoPoint(lat, lon)
                 
                 motorManager.updateGpsInfo(lat, lon, speedKnots, course)
                 gpsManager.updateGpsInfo(lat, lon, speedKnots, course)
@@ -721,6 +735,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             _gpsSpeedKnots.value = speedKnots
             val course = if (location.hasBearing()) location.bearing.toInt() else null
             _gpsCourse.value = course
+            _currentLocation.value = GeoPoint(location.latitude, location.longitude)
             motorManager.updateGpsInfo(location.latitude, location.longitude, speedKnots, course)
 
             // Update magnetic declination
@@ -1477,6 +1492,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             .putFloat(KEY_AP_KI, ki)
             .putFloat(KEY_AP_KD, kd)
             .apply()
+    }
+
+    // ── Navigation ───────────────────────────────────────────────────────
+    fun saveCurrentLocation() {
+        val loc = _currentLocation.value ?: return
+        val updated = _waypoints.value.toMutableList()
+        updated.add(loc)
+        _waypoints.value = updated
+        saveWaypoints(updated)
+        speak("Location saved")
+    }
+
+    fun clearWaypoints() {
+        _waypoints.value = emptyList()
+        saveWaypoints(emptyList())
+        _targetLocation.value = null
+        speak("Waypoints cleared")
+    }
+
+    fun setTargetLocation(loc: GeoPoint?) {
+        _targetLocation.value = loc
+        if (loc != null) {
+            speak("Target set")
+        }
+    }
+
+    private fun loadWaypoints(): List<GeoPoint> {
+        val raw = prefs.getString(KEY_WAYPOINTS, null) ?: return emptyList()
+        return try {
+            raw.split(";").filter { it.isNotBlank() }.map {
+                val pts = it.split(",")
+                GeoPoint(pts[0].toDouble(), pts[1].toDouble())
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load waypoints", e)
+            emptyList()
+        }
+    }
+
+    private fun saveWaypoints(points: List<GeoPoint>) {
+        val raw = points.joinToString(";") { "${it.latitude},${it.longitude}" }
+        prefs.edit().putString(KEY_WAYPOINTS, raw).apply()
     }
 
     override fun onCleared() {

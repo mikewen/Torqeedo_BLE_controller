@@ -1,5 +1,6 @@
 package com.torqeedo.controller.ui
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.inputmethod.EditorInfo
 import android.widget.SeekBar
@@ -29,6 +30,8 @@ class AutoPilotActivity : AppCompatActivity() {
 
         setupControls()
         observeState()
+        
+        vm.startGpsUpdates()
     }
 
     private fun setupControls() {
@@ -47,6 +50,10 @@ class AutoPilotActivity : AppCompatActivity() {
 
         binding.swUseRudderSensor.setOnCheckedChangeListener { _, isChecked ->
             vm.setUseRudderSensor(isChecked)
+        }
+
+        binding.btnOpenMap.setOnClickListener {
+            startActivity(Intent(this, MapPickerActivity::class.java))
         }
 
         // PID Tuning - Kp
@@ -202,7 +209,22 @@ class AutoPilotActivity : AppCompatActivity() {
                         binding.sbKd.progress = (kd * 10).toInt()
                     }
                 }
+
+                launch {
+                    vm.targetLocation.collectLatest { loc ->
+                        if (loc != null) {
+                            binding.tvWaypointInfo.text = "Target: %.5f, %.5f".format(loc.latitude, loc.longitude)
+                        } else {
+                            binding.tvWaypointInfo.text = "No target set"
+                        }
+                    }
+                }
             }
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        vm.stopGpsUpdates()
     }
 }
