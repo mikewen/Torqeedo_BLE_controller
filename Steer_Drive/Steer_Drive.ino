@@ -123,7 +123,8 @@ void initQMC6308() {
     // Configure: Continuous mode, 80Hz ODR
     Wire.beginTransmission(QMC6308_ADDR);
     Wire.write(REG_CTRL);
-    Wire.write(0xC1);  // Bit 7: Continuous, Bit 6-5: 80Hz, Bit 0: Normal
+    //Wire.write(0xC1);  // Bit 7: Continuous, Bit 6-5: 80Hz, Bit 0: Normal
+    Wire.write(0x81);  // ~20Hz ODR
     int err = Wire.endTransmission();
     Serial.printf("[QMC6308] Init Reg 0x0A: %s (err=%d)\n", err == 0 ? "OK" : "FAIL", err);
     delay(20);

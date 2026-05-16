@@ -14,6 +14,7 @@ import com.torqeedo.controller.R
 import com.torqeedo.controller.databinding.ActivityAutopilotBinding
 import com.torqeedo.controller.viewmodel.MainViewModel
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 class AutoPilotActivity : AppCompatActivity() {
@@ -42,6 +43,10 @@ class AutoPilotActivity : AppCompatActivity() {
 
         binding.btnToggleAutoPilot.setOnClickListener {
             vm.setAutoPilotActive(!vm.autoPilotActive.value)
+        }
+
+        binding.swUseRudderSensor.setOnCheckedChangeListener { _, isChecked ->
+            vm.setUseRudderSensor(isChecked)
         }
 
         // PID Tuning - Kp
@@ -138,6 +143,14 @@ class AutoPilotActivity : AppCompatActivity() {
                 }
 
                 launch {
+                    vm.useRudderSensor.collectLatest { use ->
+                        if (binding.swUseRudderSensor.isChecked != use) {
+                            binding.swUseRudderSensor.isChecked = use
+                        }
+                    }
+                }
+
+                launch {
                     vm.seaState.collectLatest { state ->
                         binding.tvSeaState.text = state.name
                         val color = when (state) {
@@ -150,7 +163,7 @@ class AutoPilotActivity : AppCompatActivity() {
                 }
 
                 launch {
-                    kotlinx.coroutines.flow.combine(vm.witPitch, vm.witRoll) { pitch, roll ->
+                    combine(vm.witPitch, vm.witRoll) { pitch, roll ->
                         "P: %.1f° R: %.1f°".format(pitch, roll)
                     }.collectLatest { text ->
                         binding.tvPitchRoll.text = text

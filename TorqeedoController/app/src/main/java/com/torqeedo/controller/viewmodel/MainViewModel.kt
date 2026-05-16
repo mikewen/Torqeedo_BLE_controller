@@ -94,6 +94,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         private const val KEY_AP_KP = "ap_kp"
         private const val KEY_AP_KI = "ap_ki"
         private const val KEY_AP_KD = "ap_kd"
+        private const val KEY_USE_RUDDER_SENSOR = "use_rudder_sensor"
         
         private const val DEFAULT_AP_KP = 2.5f
         private const val DEFAULT_AP_KI = 0.1f
@@ -318,6 +319,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     private val _targetHeading = MutableStateFlow(0f)
     val targetHeading: StateFlow<Float> = _targetHeading.asStateFlow()
+
+    private val _useRudderSensor = MutableStateFlow(prefs.getBoolean(KEY_USE_RUDDER_SENSOR, false))
+    val useRudderSensor: StateFlow<Boolean> = _useRudderSensor.asStateFlow()
 
     // PID Gains
     private val _apKp = MutableStateFlow(prefs.getFloat(KEY_AP_KP, DEFAULT_AP_KP))
@@ -830,6 +834,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     fun setSteerScale(scale: Int) {
         _steerScale.value = scale
         prefs.edit().putInt(KEY_STEER_SCALE, scale).apply()
+    }
+
+    fun setUseRudderSensor(use: Boolean) {
+        _useRudderSensor.value = use
+        prefs.edit().putBoolean(KEY_USE_RUDDER_SENSOR, use).apply()
     }
 
     // ── Calibration ───────────────────────────────────────────────────────
@@ -1425,9 +1434,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         
         val output = (error * _apKp.value) + (autopilotIntegral * _apKi.value) + (derivative * _apKd.value)
         
-        // Convert PID output to steer value (-STEER_MAX to STEER_MAX)
-        // Adjust polarity if needed: Positive output should steer Right (+) to increase heading
-        setSteerValue(output.toInt())
+        if (_useRudderSensor.value) {
+            // Use Rudder Position Feedback (0xA5) to close the loop
+            // Scale PID output to -100 to 100 (Rudder Percent)
+            val targetRudderPos = output.coerceIn(-100f, 100f)
+            val currentRudderPos = rudderPosition.value
+            val rudderError = targetRudderPos - currentRudderPos
+            
+            // simple proportional steering adjustment
+            if (abs(rudderError) > 2.0f) {
+                val step = if (rudderError > 0) 1 else -1
+                adjustSteer(step)
+            }
+        } else {
+            // Legacy open-loop steering command
+            // Convert PID output to steer value (-STEER_MAX to STEER_MAX)
+            setSteerValue(output.toInt())
+        }
     }
 
     fun setApKp(kp: Float) {
