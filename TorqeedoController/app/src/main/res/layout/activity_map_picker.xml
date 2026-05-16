@@ -73,7 +73,8 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
 
             <Button
                 android:id="@+id/btnSaveLocation"
@@ -81,20 +82,30 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="SAVE CURRENT POS"
+                android:text="SAVE POS"
                 android:textSize="12sp"
                 android:layout_marginEnd="4dp"/>
 
             <Button
-                android:id="@+id/btnClearWaypoints"
+                android:id="@+id/btnViewList"
                 style="@style/Widget.TorqeedoController.Button.Secondary"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="CLEAR WAYPOINTS"
+                android:text="VIEW LIST"
                 android:textSize="12sp"
                 android:layout_marginStart="4dp"/>
         </LinearLayout>
+
+        <Button
+            android:id="@+id/btnClearWaypoints"
+            style="@style/Widget.TorqeedoController.Button.Stop"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="CLEAR ALL WAYPOINTS"
+            android:textSize="12sp"
+            app:strokeColor="@color/status_disconnected"
+            android:textColor="@color/status_disconnected"/>
     </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

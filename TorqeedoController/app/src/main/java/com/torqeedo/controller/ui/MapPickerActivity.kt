@@ -1,7 +1,11 @@
 package com.torqeedo.controller.ui
 
 import android.os.Bundle
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.activity.viewModels
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -27,6 +31,7 @@ class MapPickerActivity : AppCompatActivity() {
     private var currentPosMarker: Marker? = null
     private var targetMarker: Marker? = null
     private val waypointMarkers = mutableListOf<Marker>()
+    private var hasCenteredInitially = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,12 +51,20 @@ class MapPickerActivity : AppCompatActivity() {
         binding.mapView.zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
         
         val controller = binding.mapView.controller
-        controller.setZoom(15.0)
+        controller.setZoom(17.0)
+        
+        // Initial center if location is already known
+        vm.currentLocation.value?.let {
+            controller.setCenter(it)
+            hasCenteredInitially = true
+        }
         
         // Map touch events
         val receiver = object : MapEventsReceiver {
             override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
-                vm.setTargetLocation(p)
+                p?.let {
+                    vm.setTargetLocation(it, "Custom Target")
+                }
                 return true
             }
             override fun longPressHelper(p: GeoPoint?): Boolean {
@@ -69,16 +82,71 @@ class MapPickerActivity : AppCompatActivity() {
         binding.btnCenterMap.setOnClickListener {
             vm.currentLocation.value?.let {
                 binding.mapView.controller.animateTo(it)
+            } ?: run {
+                Toast.makeText(this, "Location unknown", Toast.LENGTH_SHORT).show()
             }
         }
 
         binding.btnSaveLocation.setOnClickListener {
-            vm.saveCurrentLocation()
+            if (vm.currentLocation.value == null) {
+                Toast.makeText(this, "Cannot save: GPS not fixed", Toast.LENGTH_SHORT).show()
+            } else {
+                showSaveLocationDialog()
+            }
+        }
+
+        binding.btnViewList.setOnClickListener {
+            showWaypointListDialog()
         }
 
         binding.btnClearWaypoints.setOnClickListener {
-            vm.clearWaypoints()
+            AlertDialog.Builder(this)
+                .setTitle("Clear Waypoints")
+                .setMessage("Are you sure you want to delete all saved locations?")
+                .setPositiveButton("Clear") { _, _ -> vm.clearWaypoints() }
+                .setNegativeButton("Cancel", null)
+                .show()
         }
+    }
+
+    private fun showSaveLocationDialog() {
+        val input = EditText(this)
+        val container = FrameLayout(this)
+        val params = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT)
+        params.setMargins(48, 24, 48, 24)
+        input.layoutParams = params
+        input.hint = "e.g. Fishing Spot 1"
+        container.addView(input)
+
+        AlertDialog.Builder(this)
+            .setTitle("Save Location")
+            .setMessage("Enter a name for this location:")
+            .setView(container)
+            .setPositiveButton("Save") { _, _ ->
+                val name = input.text.toString().ifBlank { "Waypoint ${waypointMarkers.size + 1}" }
+                vm.saveLocation(name)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showWaypointListDialog() {
+        val waypoints = vm.waypoints.value
+        if (waypoints.isEmpty()) {
+            Toast.makeText(this, "No saved locations", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val names = waypoints.map { it.name }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Saved Locations")
+            .setItems(names) { _, which ->
+                val wp = waypoints[which]
+                vm.setTargetLocation(wp.point, wp.name)
+                binding.mapView.controller.animateTo(wp.point)
+            }
+            .setNegativeButton("Close", null)
+            .show()
     }
 
     private fun observeState() {
@@ -91,9 +159,16 @@ class MapPickerActivity : AppCompatActivity() {
                                 currentPosMarker = Marker(binding.mapView)
                                 currentPosMarker?.icon = ContextCompat.getDrawable(this@MapPickerActivity, android.R.drawable.ic_menu_compass)
                                 currentPosMarker?.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                                currentPosMarker?.title = "My Location"
                                 binding.mapView.overlays.add(currentPosMarker)
                             }
                             currentPosMarker?.position = loc
+                            
+                            if (!hasCenteredInitially) {
+                                binding.mapView.controller.setCenter(loc)
+                                hasCenteredInitially = true
+                            }
+                            
                             binding.mapView.invalidate()
                         }
                     }
@@ -116,7 +191,9 @@ class MapPickerActivity : AppCompatActivity() {
                                 binding.mapView.overlays.add(targetMarker)
                             }
                             targetMarker?.position = loc
-                            binding.tvWaypointInfo.text = "Target: %.5f, %.5f".format(loc.latitude, loc.longitude)
+                            val name = vm.targetName.value ?: "Target"
+                            targetMarker?.title = name
+                            binding.tvWaypointInfo.text = "$name: %.5f, %.5f".format(loc.latitude, loc.longitude)
                         } else {
                             targetMarker?.let { binding.mapView.overlays.remove(it) }
                             targetMarker = null
@@ -127,16 +204,19 @@ class MapPickerActivity : AppCompatActivity() {
                 }
 
                 launch {
-                    vm.waypoints.collectLatest { points ->
+                    vm.waypoints.collectLatest { waypoints ->
                         waypointMarkers.forEach { binding.mapView.overlays.remove(it) }
                         waypointMarkers.clear()
-                        points.forEach { p ->
+                        waypoints.forEach { wp ->
                             val m = Marker(binding.mapView)
-                            m.position = p
+                            m.position = wp.point
                             m.icon = ContextCompat.getDrawable(this@MapPickerActivity, android.R.drawable.ic_input_add)
                             m.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                            m.title = wp.name
+                            m.snippet = "Tap to navigate here"
                             m.setOnMarkerClickListener { marker, _ ->
-                                vm.setTargetLocation(marker.position)
+                                vm.setTargetLocation(marker.position, wp.name)
+                                marker.showInfoWindow()
                                 true
                             }
                             binding.mapView.overlays.add(m)

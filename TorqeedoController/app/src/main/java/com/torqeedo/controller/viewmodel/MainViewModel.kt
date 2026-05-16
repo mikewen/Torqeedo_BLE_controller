@@ -81,7 +81,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         
         private const val DEFAULT_SPEED_STEP = 20        // 2% steps
         private const val DEFAULT_AUTO_DELAY = 200L      // 5 steps per second (10% / sec)
-        private const val DEFAULT_THROTTLE_DELAY = 200L  // 5 Hz throttle loop
         private const val STATUS_QUERY_DELAY = 500L      // 2 Hz status query
         private const val SENSOR_READ_DELAY = 200L       // 5 Hz current sensor read
         
@@ -102,7 +101,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         private const val DEFAULT_AP_KD = 1.0f
         private const val AUTOPILOT_MAX_I = 20f          // Max integral contribution
 
-        private const val KEY_WAYPOINTS = "waypoints"
+        private const val KEY_WAYPOINTS = "waypoints_v3"
     }
 
     private val prefs: SharedPreferences = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -114,7 +113,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private val _autoIncrementDelay = MutableStateFlow(DEFAULT_AUTO_DELAY)
     val autoIncrementDelay: StateFlow<Long> = _autoIncrementDelay.asStateFlow()
 
-    private val _throttleDelay = MutableStateFlow(DEFAULT_THROTTLE_DELAY)
+    private val _throttleDelay = MutableStateFlow(200L)
     val throttleDelay: StateFlow<Long> = _throttleDelay.asStateFlow()
 
     private val _scanAllNames = MutableStateFlow(false)
@@ -316,15 +315,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private val _gpsCourse = MutableStateFlow<Int?>(null)
     val gpsCourse: StateFlow<Int?> = _gpsCourse.asStateFlow()
 
-    private val _currentLocation = MutableStateFlow<GeoPoint?>(null)
-    val currentLocation: StateFlow<GeoPoint?> = _currentLocation.asStateFlow()
-
-    // Waypoints
-    private val _waypoints = MutableStateFlow<List<GeoPoint>>(loadWaypoints())
-    val waypoints: StateFlow<List<GeoPoint>> = _waypoints.asStateFlow()
-
-    private val _targetLocation = MutableStateFlow<GeoPoint?>(null)
-    val targetLocation: StateFlow<GeoPoint?> = _targetLocation.asStateFlow()
+    // Global navigation state from BleRepository
+    val currentLocation: StateFlow<GeoPoint?> = BleRepository.currentLocation
+    val waypoints: StateFlow<List<Waypoint>> = BleRepository.waypoints
+    val targetLocation: StateFlow<GeoPoint?> = BleRepository.targetLocation
+    val targetName: StateFlow<String?> = BleRepository.targetName
 
     // Auto-pilot state
     private val _autoPilotActive = MutableStateFlow(false)
@@ -385,6 +380,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         
         loadSteerLutData()
 
+        // Load Waypoints into repository if repo is empty
+        if (BleRepository.waypoints.value.isEmpty()) {
+            BleRepository.setWaypoints(loadWaypoints())
+        }
+
         // Auto-reconnect to remote if we have a saved MAC
         if (!remote.isConnected) {
             prefs.getString(KEY_REMOTE_MAC, null)?.let { mac ->
@@ -438,10 +438,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     speak("${speedMagnitude.value / 10} percent")
                 }
                 LookbonRemote.Command.START_REPEAT_UP -> {
-                    startAutoIncrease(multiplier = 1)
+                    startAutoIncrease()
                 }
                 LookbonRemote.Command.START_REPEAT_DOWN -> {
-                    startAutoDecrease(multiplier = 1)
+                    startAutoDecrease()
                 }
                 LookbonRemote.Command.START_REPEAT_UP_FAST -> {
                     startAutoIncrease(multiplier = 2)
@@ -647,7 +647,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 _gpsFix.value = true
                 _gpsSpeedKnots.value = speedKnots
                 _gpsCourse.value = course
-                _currentLocation.value = GeoPoint(lat, lon)
+                BleRepository.setCurrentLocation(GeoPoint(lat, lon))
                 
                 motorManager.updateGpsInfo(lat, lon, speedKnots, course)
                 gpsManager.updateGpsInfo(lat, lon, speedKnots, course)
@@ -735,7 +735,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             _gpsSpeedKnots.value = speedKnots
             val course = if (location.hasBearing()) location.bearing.toInt() else null
             _gpsCourse.value = course
-            _currentLocation.value = GeoPoint(location.latitude, location.longitude)
+            BleRepository.setCurrentLocation(GeoPoint(location.latitude, location.longitude))
             motorManager.updateGpsInfo(location.latitude, location.longitude, speedKnots, course)
 
             // Update magnetic declination
@@ -1495,35 +1495,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     }
 
     // ── Navigation ───────────────────────────────────────────────────────
-    fun saveCurrentLocation() {
-        val loc = _currentLocation.value ?: return
-        val updated = _waypoints.value.toMutableList()
-        updated.add(loc)
-        _waypoints.value = updated
+    fun saveLocation(name: String) {
+        val loc = BleRepository.currentLocation.value ?: return
+        val updated = BleRepository.waypoints.value.toMutableList()
+        updated.add(Waypoint(name, loc))
+        BleRepository.setWaypoints(updated)
         saveWaypoints(updated)
-        speak("Location saved")
+        speak("Location $name saved")
+    }
+
+    fun removeWaypoint(waypoint: Waypoint) {
+        val updated = BleRepository.waypoints.value.toMutableList()
+        updated.remove(waypoint)
+        BleRepository.setWaypoints(updated)
+        saveWaypoints(updated)
+        if (BleRepository.targetLocation.value == waypoint.point) {
+            BleRepository.setTarget(null, null)
+        }
     }
 
     fun clearWaypoints() {
-        _waypoints.value = emptyList()
+        BleRepository.setWaypoints(emptyList())
         saveWaypoints(emptyList())
-        _targetLocation.value = null
+        BleRepository.setTarget(null, null)
         speak("Waypoints cleared")
     }
 
-    fun setTargetLocation(loc: GeoPoint?) {
-        _targetLocation.value = loc
+    fun setTargetLocation(loc: GeoPoint?, name: String? = null) {
+        BleRepository.setTarget(loc, name)
         if (loc != null) {
             speak("Target set")
         }
     }
 
-    private fun loadWaypoints(): List<GeoPoint> {
+    private fun loadWaypoints(): List<Waypoint> {
         val raw = prefs.getString(KEY_WAYPOINTS, null) ?: return emptyList()
         return try {
             raw.split(";").filter { it.isNotBlank() }.map {
                 val pts = it.split(",")
-                GeoPoint(pts[0].toDouble(), pts[1].toDouble())
+                Waypoint(pts[0], GeoPoint(pts[1].toDouble(), pts[2].toDouble()))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load waypoints", e)
@@ -1531,8 +1541,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
-    private fun saveWaypoints(points: List<GeoPoint>) {
-        val raw = points.joinToString(";") { "${it.latitude},${it.longitude}" }
+    private fun saveWaypoints(points: List<Waypoint>) {
+        val raw = points.joinToString(";") { "${it.name},${it.point.latitude},${it.point.longitude}" }
         prefs.edit().putString(KEY_WAYPOINTS, raw).apply()
     }
 
