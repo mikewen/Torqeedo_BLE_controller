@@ -1,5 +1,6 @@
 package com.torqeedo.controller.ui
 
+import android.annotation.SuppressLint
 import android.os.Bundle
 import android.view.MotionEvent
 import androidx.activity.viewModels
@@ -27,23 +28,38 @@ class CalibrationActivity : AppCompatActivity() {
         observeState()
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     private fun setupControls() {
         binding.btnBack.setOnClickListener {
             finish()
         }
 
         // Manual Drive Buttons (Hold to repeat)
-        binding.btnSteerLeft.setOnTouchListener { _, event ->
+        binding.btnSteerLeft.setOnTouchListener { v, event ->
             when (event.action) {
-                MotionEvent.ACTION_DOWN -> vm.startSteerRepeat(-1)
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> vm.stopSteerRepeat()
+                MotionEvent.ACTION_DOWN -> {
+                    v.isPressed = true
+                    vm.startSteerRepeat(-1)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.isPressed = false
+                    vm.stopSteerRepeat()
+                    v.performClick()
+                }
             }
             true
         }
-        binding.btnSteerRight.setOnTouchListener { _, event ->
+        binding.btnSteerRight.setOnTouchListener { v, event ->
             when (event.action) {
-                MotionEvent.ACTION_DOWN -> vm.startSteerRepeat(1)
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> vm.stopSteerRepeat()
+                MotionEvent.ACTION_DOWN -> {
+                    v.isPressed = true
+                    vm.startSteerRepeat(1)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.isPressed = false
+                    vm.stopSteerRepeat()
+                    v.performClick()
+                }
             }
             true
         }

@@ -23,6 +23,7 @@ import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.sqrt
 
 class MainViewModel(application: Application) : AndroidViewModel(application), TextToSpeech.OnInitListener {
 
@@ -49,12 +50,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         private const val KEY_BIAS1 = "steer_bias1"
         private const val KEY_BIAS2 = "steer_bias2"
         
-        private const val KEY_RATIO_CENTER = "ratio_center"
-        private const val KEY_RATIO_PORT22 = "ratio_port22"
-        private const val KEY_RATIO_PORT35 = "ratio_port35"
-        private const val KEY_RATIO_STBD22 = "ratio_stbd22"
-        private const val KEY_RATIO_STBD35 = "ratio_stbd35"
-        private const val KEY_STEER_LUT = "steer_lut_data"
+        // 2D Vector Calibration Points (A, B)
+        private const val KEY_VEC_A_CENTER = "vec_a_center"
+        private const val KEY_VEC_B_CENTER = "vec_b_center"
+        private const val KEY_VEC_A_PORT22 = "vec_a_port22"
+        private const val KEY_VEC_B_PORT22 = "vec_b_port22"
+        private const val KEY_VEC_A_PORT35 = "vec_a_port35"
+        private const val KEY_VEC_B_PORT35 = "vec_b_port35"
+        private const val KEY_VEC_A_STBD22 = "vec_a_stbd22"
+        private const val KEY_VEC_B_STBD22 = "vec_b_stbd22"
+        private const val KEY_VEC_A_STBD35 = "vec_a_stbd35"
+        private const val KEY_VEC_B_STBD35 = "vec_b_stbd35"
+
+        private const val KEY_STEER_LUT_A = "steer_lut_a"
+        private const val KEY_STEER_LUT_B = "steer_lut_b"
 
         const val SPEED_MAX = 1000
         const val SPEED_MIN = 0
@@ -73,7 +82,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
         private const val AUTOPILOT_DELAY = 200L         // 5 Hz autopilot loop
         private const val KEY_AP_KP = "ap_kp"
-        private const val KEY_AP_KI = "ap_KI"
+        private const val KEY_AP_KI = "ap_ki"
         private const val KEY_AP_KD = "ap_kd"
         
         private const val DEFAULT_AP_KP = 2.5f
@@ -791,38 +800,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         speak("Steer sensor bias calibrated")
     }
 
-    // New Steer Calibration methods
+    // New Steer Calibration methods (2D Vector Path)
     fun setSteerCalibCenter() {
-        val r = steerSensorRatio.value
-        prefs.edit().putFloat(KEY_RATIO_CENTER, r).apply()
+        val a = steerProcessor.getVectorA(_steerSensorA.value)
+        val b = steerProcessor.getVectorB(_steerSensorB.value)
+        prefs.edit().putFloat(KEY_VEC_A_CENTER, a).putFloat(KEY_VEC_B_CENTER, b).apply()
         recalculateAndSaveLut()
-        speak("Center zero calibrated")
+        speak("Center 0 degrees calibrated")
     }
 
     fun setSteerCalibPort22() {
-        val r = steerSensorRatio.value
-        prefs.edit().putFloat(KEY_RATIO_PORT22, r).apply()
+        val a = steerProcessor.getVectorA(_steerSensorA.value)
+        val b = steerProcessor.getVectorB(_steerSensorB.value)
+        prefs.edit().putFloat(KEY_VEC_A_PORT22, a).putFloat(KEY_VEC_B_PORT22, b).apply()
         recalculateAndSaveLut()
         speak("Port 22.5 calibrated")
     }
 
     fun setSteerCalibPort35() {
-        val r = steerSensorRatio.value
-        prefs.edit().putFloat(KEY_RATIO_PORT35, r).apply()
+        val a = steerProcessor.getVectorA(_steerSensorA.value)
+        val b = steerProcessor.getVectorB(_steerSensorB.value)
+        prefs.edit().putFloat(KEY_VEC_A_PORT35, a).putFloat(KEY_VEC_B_PORT35, b).apply()
         recalculateAndSaveLut()
         speak("Port 35 calibrated")
     }
 
     fun setSteerCalibStbd22() {
-        val r = steerSensorRatio.value
-        prefs.edit().putFloat(KEY_RATIO_STBD22, r).apply()
+        val a = steerProcessor.getVectorA(_steerSensorA.value)
+        val b = steerProcessor.getVectorB(_steerSensorB.value)
+        prefs.edit().putFloat(KEY_VEC_A_STBD22, a).putFloat(KEY_VEC_B_STBD22, b).apply()
         recalculateAndSaveLut()
         speak("Starboard 22.5 calibrated")
     }
 
     fun setSteerCalibStbd35() {
-        val r = steerSensorRatio.value
-        prefs.edit().putFloat(KEY_RATIO_STBD35, r).apply()
+        val a = steerProcessor.getVectorA(_steerSensorA.value)
+        val b = steerProcessor.getVectorB(_steerSensorB.value)
+        prefs.edit().putFloat(KEY_VEC_A_STBD35, a).putFloat(KEY_VEC_B_STBD35, b).apply()
         recalculateAndSaveLut()
         speak("Starboard 35 calibrated")
     }
@@ -836,12 +850,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     }
 
     private fun loadSteerLutData() {
-        val lutStr = prefs.getString(KEY_STEER_LUT, null)
-        if (lutStr != null) {
+        val lutA = prefs.getString(KEY_STEER_LUT_A, null)
+        val lutB = prefs.getString(KEY_STEER_LUT_B, null)
+        if (lutA != null && lutB != null) {
             try {
-                val ratios = lutStr.split(",").map { it.toFloat() }.toFloatArray()
-                if (ratios.size == SteerSensorProcessor.TABLE_SIZE) {
-                    steerProcessor.updateTable(ratios)
+                val arrayA = lutA.split(",").map { it.toFloat() }.toFloatArray()
+                val arrayB = lutB.split(",").map { it.toFloat() }.toFloatArray()
+                if (arrayA.size == SteerSensorProcessor.TABLE_SIZE && arrayB.size == SteerSensorProcessor.TABLE_SIZE) {
+                    steerProcessor.updateTable(arrayA, arrayB)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load LUT data", e)
@@ -852,17 +868,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     }
 
     private fun saveSteerLutData() {
-        val ratios = steerProcessor.getRatioTable()
-        val lutStr = ratios.joinToString(",") { "%.6f".format(it) }
-        prefs.edit().putString(KEY_STEER_LUT, lutStr).apply()
+        val pathA = steerProcessor.getPathA()
+        val pathB = steerProcessor.getPathB()
+        prefs.edit()
+            .putString(KEY_STEER_LUT_A, pathA.joinToString(",") { "%.3f".format(it) })
+            .putString(KEY_STEER_LUT_B, pathB.joinToString(",") { "%.3f".format(it) })
+            .apply()
     }
 
     fun autoCalibPort() {
         viewModelScope.launch {
             speak("Auto calibrate port started")
-            val targetRatio = prefs.getFloat(KEY_RATIO_PORT22, -1000f)
-            if (targetRatio == -1000f) {
-                speak("Error: Port 22 point not set")
+            val targetA = prefs.getFloat(KEY_VEC_A_PORT22, -9999f)
+            val targetB = prefs.getFloat(KEY_VEC_B_PORT22, -9999f)
+            if (targetA == -9999f) {
+                speak("Error: Port 22 point not set manually")
                 return@launch
             }
 
@@ -870,8 +890,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             delay(1000)
             
             val startTime = System.currentTimeMillis()
-            val sampledPoints = mutableListOf<Pair<Long, Float>>()
-            sampledPoints.add(0L to steerSensorRatio.value)
+            // Sample list: Triple(A, B, Time)
+            val samples = mutableListOf<Triple<Float, Float, Long>>()
+            samples.add(Triple(steerProcessor.getVectorA(_steerSensorA.value), steerProcessor.getVectorB(_steerSensorB.value), 0L))
 
             var timedOut = false
             val timeout = 15000L 
@@ -883,15 +904,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 }
             }
 
-            val startRatio = steerSensorRatio.value
-            val isDecreasing = targetRatio < startRatio
-
             while (true) {
-                val currentRatio = steerSensorRatio.value
-                sampledPoints.add((System.currentTimeMillis() - startTime) to currentRatio)
-                val reached = if (isDecreasing) currentRatio <= targetRatio else currentRatio >= targetRatio
-                if (reached) break
-                if (System.currentTimeMillis() - startTime > timeout) {
+                val curA = steerProcessor.getVectorA(_steerSensorA.value)
+                val curB = steerProcessor.getVectorB(_steerSensorB.value)
+                val now = System.currentTimeMillis() - startTime
+                samples.add(Triple(curA, curB, now))
+                
+                // Distance to target in vector space
+                val distToTarget = sqrt(((curA - targetA) * (curA - targetA) + (curB - targetB) * (curB - targetB)).toDouble())
+                if (distToTarget < 15.0) break // Reached target within tolerance
+                
+                if (now > timeout) {
                     timedOut = true
                     break
                 }
@@ -900,11 +923,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             driveJob.cancel()
             
             if (!timedOut) {
-                val totalTime = System.currentTimeMillis() - startTime
-                speak("Reached 22.5 degrees. Updating LUT.")
-                val timedPoints = sampledPoints.map { (time, ratio) ->
+                val totalTime = samples.last().third
+                speak("Reached 22.5 degrees. Building LUT.")
+                val timedPoints = samples.map { (a, b, time) ->
                     val angle = -(time.toFloat() / totalTime.toFloat()) * 22.5f
-                    ratio to angle
+                    Triple(a, b, angle)
                 }
                 val manualPoints = getManualPoints()
                 steerProcessor.fillTableFromPoints(manualPoints + timedPoints)
@@ -918,9 +941,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     fun autoCalibStbd() {
         viewModelScope.launch {
             speak("Auto calibrate starboard started")
-            val targetRatio = prefs.getFloat(KEY_RATIO_STBD22, -1000f)
-            if (targetRatio == -1000f) {
-                speak("Error: Stbd 22 point not set")
+            val targetA = prefs.getFloat(KEY_VEC_A_STBD22, -9999f)
+            val targetB = prefs.getFloat(KEY_VEC_B_STBD22, -9999f)
+            if (targetA == -9999f) {
+                speak("Error: Stbd 22 point not set manually")
                 return@launch
             }
 
@@ -928,8 +952,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             delay(1000)
             
             val startTime = System.currentTimeMillis()
-            val sampledPoints = mutableListOf<Pair<Long, Float>>()
-            sampledPoints.add(0L to steerSensorRatio.value)
+            val samples = mutableListOf<Triple<Float, Float, Long>>()
+            samples.add(Triple(steerProcessor.getVectorA(_steerSensorA.value), steerProcessor.getVectorB(_steerSensorB.value), 0L))
 
             var timedOut = false
             val timeout = 15000L
@@ -941,15 +965,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 }
             }
 
-            val startRatio = steerSensorRatio.value
-            val isDecreasing = targetRatio < startRatio
-
             while (true) {
-                val currentRatio = steerSensorRatio.value
-                sampledPoints.add((System.currentTimeMillis() - startTime) to currentRatio)
-                val reached = if (isDecreasing) currentRatio <= targetRatio else currentRatio >= targetRatio
-                if (reached) break
-                if (System.currentTimeMillis() - startTime > timeout) {
+                val curA = steerProcessor.getVectorA(_steerSensorA.value)
+                val curB = steerProcessor.getVectorB(_steerSensorB.value)
+                val now = System.currentTimeMillis() - startTime
+                samples.add(Triple(curA, curB, now))
+                
+                val distToTarget = sqrt(((curA - targetA) * (curA - targetA) + (curB - targetB) * (curB - targetB)).toDouble())
+                if (distToTarget < 15.0) break
+                
+                if (now > timeout) {
                     timedOut = true
                     break
                 }
@@ -958,11 +983,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             driveJob.cancel()
             
             if (!timedOut) {
-                val totalTime = System.currentTimeMillis() - startTime
-                speak("Reached 22.5 degrees. Updating LUT.")
-                val timedPoints = sampledPoints.map { (time, ratio) ->
+                val totalTime = samples.last().third
+                speak("Reached 22.5 degrees. Building LUT.")
+                val timedPoints = samples.map { (a, b, time) ->
                     val angle = (time.toFloat() / totalTime.toFloat()) * 22.5f
-                    ratio to angle
+                    Triple(a, b, angle)
                 }
                 val manualPoints = getManualPoints()
                 steerProcessor.fillTableFromPoints(manualPoints + timedPoints)
@@ -973,20 +998,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         }
     }
 
-    private fun getManualPoints(): List<Pair<Float, Float>> {
-        val points = mutableListOf<Pair<Float, Float>>()
-        if (prefs.contains(KEY_RATIO_CENTER)) points.add(prefs.getFloat(KEY_RATIO_CENTER, 0f) to 0f)
-        if (prefs.contains(KEY_RATIO_PORT22)) points.add(prefs.getFloat(KEY_RATIO_PORT22, 0f) to -22.5f)
-        if (prefs.contains(KEY_RATIO_PORT35)) points.add(prefs.getFloat(KEY_RATIO_PORT35, 0f) to -35f)
-        if (prefs.contains(KEY_RATIO_STBD22)) points.add(prefs.getFloat(KEY_RATIO_STBD22, 0f) to 22.5f)
-        if (prefs.contains(KEY_RATIO_STBD35)) points.add(prefs.getFloat(KEY_RATIO_STBD35, 0f) to 35f)
+    private fun getManualPoints(): List<Triple<Float, Float, Float>> {
+        val points = mutableListOf<Triple<Float, Float, Float>>()
+        if (prefs.contains(KEY_VEC_A_CENTER)) 
+            points.add(Triple(prefs.getFloat(KEY_VEC_A_CENTER, 0f), prefs.getFloat(KEY_VEC_B_CENTER, 0f), 0f))
+        if (prefs.contains(KEY_VEC_A_PORT22)) 
+            points.add(Triple(prefs.getFloat(KEY_VEC_A_PORT22, 0f), prefs.getFloat(KEY_VEC_B_PORT22, 0f), -22.5f))
+        if (prefs.contains(KEY_VEC_A_PORT35)) 
+            points.add(Triple(prefs.getFloat(KEY_VEC_A_PORT35, 0f), prefs.getFloat(KEY_VEC_B_PORT35, 0f), -35f))
+        if (prefs.contains(KEY_VEC_A_STBD22)) 
+            points.add(Triple(prefs.getFloat(KEY_VEC_A_STBD22, 0f), prefs.getFloat(KEY_VEC_B_STBD22, 0f), 22.5f))
+        if (prefs.contains(KEY_VEC_A_STBD35)) 
+            points.add(Triple(prefs.getFloat(KEY_VEC_A_STBD35, 0f), prefs.getFloat(KEY_VEC_B_STBD35, 0f), 35f))
         return points
     }
 
     private suspend fun moveToAngle(targetAngle: Float) {
         val timeout = 5000L
         val start = System.currentTimeMillis()
-        while (abs(steerSensorAngle.value - targetAngle) > 1.5f) {
+        while (abs(steerSensorAngle.value - targetAngle) > 2.0f) {
             val diff = targetAngle - steerSensorAngle.value
             val step = if (diff > 0) 1 else -1
             adjustSteer(step)
@@ -1292,7 +1322,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     override fun onCleared() {
         super.onCleared()
         stopThrottleLoop()
-        stopStatusQueryLoop()
+        statusQueryJob?.cancel()
         stopSensorReadLoop()
         stopAutoAdjustment()
         stopSteerRepeat()
