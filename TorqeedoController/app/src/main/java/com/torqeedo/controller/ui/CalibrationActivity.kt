@@ -34,50 +34,50 @@ class CalibrationActivity : AppCompatActivity() {
             finish()
         }
 
-        // Manual Drive Buttons (Hold to repeat)
-        binding.btnSteerLeft.setOnTouchListener { v, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    v.isPressed = true
-                    vm.startSteerRepeat(-1)
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    v.isPressed = false
-                    vm.stopSteerRepeat()
-                    v.performClick()
-                }
-            }
-            true
-        }
-        binding.btnSteerRight.setOnTouchListener { v, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    v.isPressed = true
-                    vm.startSteerRepeat(1)
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    v.isPressed = false
-                    vm.stopSteerRepeat()
-                    v.performClick()
-                }
-            }
-            true
-        }
-
-        binding.btnCalibHallBias.setOnClickListener {
-            vm.calibrateSteerBias()
-        }
-
-        // Manual Hall Calibration
-        binding.btnSetCenter.setOnClickListener { vm.setSteerCalibCenter() }
-        binding.btnSetPort22.setOnClickListener { vm.setSteerCalibPort22() }
-        binding.btnSetPort35.setOnClickListener { vm.setSteerCalibPort35() }
-        binding.btnSetStbd22.setOnClickListener { vm.setSteerCalibStbd22() }
-        binding.btnSetStbd35.setOnClickListener { vm.setSteerCalibStbd35() }
-
-        // Auto Hall Calibration
-        binding.btnAutoCalibPort.setOnClickListener { vm.autoCalibPort() }
-        binding.btnAutoCalibStbd.setOnClickListener { vm.autoCalibStbd() }
+//        // Manual Drive Buttons (Hold to repeat)
+//        binding.btnSteerLeft.setOnTouchListener { v, event ->
+//            when (event.action) {
+//                MotionEvent.ACTION_DOWN -> {
+//                    v.isPressed = true
+//                    vm.startSteerRepeat(-1)
+//                }
+//                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+//                    v.isPressed = false
+//                    vm.stopSteerRepeat()
+//                    v.performClick()
+//                }
+//            }
+//            true
+//        }
+//        binding.btnSteerRight.setOnTouchListener { v, event ->
+//            when (event.action) {
+//                MotionEvent.ACTION_DOWN -> {
+//                    v.isPressed = true
+//                    vm.startSteerRepeat(1)
+//                }
+//                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+//                    v.isPressed = false
+//                    vm.stopSteerRepeat()
+//                    v.performClick()
+//                }
+//            }
+//            true
+//        }
+//
+//        binding.btnCalibHallBias.setOnClickListener {
+//            vm.calibrateSteerBias()
+//        }
+//
+//        // Manual Hall Calibration
+//        binding.btnSetCenter.setOnClickListener { vm.setSteerCalibCenter() }
+//        binding.btnSetPort22.setOnClickListener { vm.setSteerCalibPort22() }
+//        binding.btnSetPort35.setOnClickListener { vm.setSteerCalibPort35() }
+//        binding.btnSetStbd22.setOnClickListener { vm.setSteerCalibStbd22() }
+//        binding.btnSetStbd35.setOnClickListener { vm.setSteerCalibStbd35() }
+//
+//        // Auto Hall Calibration
+//        binding.btnAutoCalibPort.setOnClickListener { vm.autoCalibPort() }
+//        binding.btnAutoCalibStbd.setOnClickListener { vm.autoCalibStbd() }
 
         // Mag Ellipse Calibration
         binding.btnStartMagEllipse.setOnClickListener {
@@ -110,39 +110,39 @@ class CalibrationActivity : AppCompatActivity() {
             showSnack("Starboard max position calibrated")
         }
 
-        binding.btnCalibGyro.setOnClickListener {
-            vm.startImuGyroCalibration()
-            showSnack("Gyro calibration started")
-        }
-
-        binding.btnCalibMag.setOnClickListener {
-            vm.startImuMagCalibration()
-            showSnack("Magnetic calibration started")
-        }
-
-        binding.btnSaveImu.setOnClickListener {
-            vm.saveImuCalibration()
-            showSnack("Calibration saved")
-        }
+//        binding.btnCalibGyro.setOnClickListener {
+//            vm.startImuGyroCalibration()
+//            showSnack("Gyro calibration started")
+//        }
+//
+//        binding.btnCalibMag.setOnClickListener {
+//            vm.startImuMagCalibration()
+//            showSnack("Magnetic calibration started")
+//        }
+//
+//        binding.btnSaveImu.setOnClickListener {
+//            vm.saveImuCalibration()
+//            showSnack("Calibration saved")
+//        }
     }
 
     private fun observeState() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                launch {
-                    vm.steerSensorA.collectLatest { a -> binding.tvHallA.text = "A: $a" }
-                }
-                launch {
-                    vm.steerSensorB.collectLatest { b -> binding.tvHallB.text = "B: $b" }
-                }
-                launch {
-                    vm.steerSensorRatio.collectLatest { r -> binding.tvHallRatio.text = "R: %.3f".format(r) }
-                }
-                launch {
-                    vm.steerSensorAngle.collectLatest { angle ->
-                        binding.tvHallAngle.text = "Angle: %.1f°".format(angle)
-                    }
-                }
+//                launch {
+//                    vm.steerSensorA.collectLatest { a -> binding.tvHallA.text = "A: $a" }
+//                }
+//                launch {
+//                    vm.steerSensorB.collectLatest { b -> binding.tvHallB.text = "B: $b" }
+//                }
+//                launch {
+//                    vm.steerSensorRatio.collectLatest { r -> binding.tvHallRatio.text = "R: %.3f".format(r) }
+//                }
+//                launch {
+//                    vm.steerSensorAngle.collectLatest { angle ->
+//                        binding.tvHallAngle.text = "Angle: %.1f°".format(angle)
+//                    }
+//                }
                 launch {
                     vm.magX.collectLatest { x -> binding.tvMagX.text = "X: $x" }
                 }
@@ -168,20 +168,20 @@ class CalibrationActivity : AppCompatActivity() {
                         }
                     }
                 }
-                launch {
-                    vm.witYaw.collectLatest { yaw -> binding.tvYaw.text = "%.1f°".format(yaw) }
-                }
-                launch {
-                    vm.witPitch.collectLatest { pitch -> binding.tvPitch.text = "%.1f°".format(pitch) }
-                }
-                launch {
-                    vm.witRoll.collectLatest { roll -> binding.tvRoll.text = "%.1f°".format(roll) }
-                }
-                launch {
-                    vm.imuCalibStatus.collectLatest { status ->
-                        binding.tvImuStatus.text = "Status: $status"
-                    }
-                }
+//                launch {
+//                    vm.witYaw.collectLatest { yaw -> binding.tvYaw.text = "%.1f°".format(yaw) }
+//                }
+//                launch {
+//                    vm.witPitch.collectLatest { pitch -> binding.tvPitch.text = "%.1f°".format(pitch) }
+//                }
+//                launch {
+//                    vm.witRoll.collectLatest { roll -> binding.tvRoll.text = "%.1f°".format(roll) }
+//                }
+//                launch {
+//                    vm.imuCalibStatus.collectLatest { status ->
+//                        binding.tvImuStatus.text = "Status: $status"
+//                    }
+//                }
             }
         }
     }

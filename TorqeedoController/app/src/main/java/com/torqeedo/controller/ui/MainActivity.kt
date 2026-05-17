@@ -217,9 +217,9 @@ class MainActivity : AppCompatActivity() {
             if (vm.isScanning.value) vm.stopScan() else vm.startRemoteScan()
         }
 
-        binding.btnScanImu.setOnClickListener {
-            if (vm.isScanning.value) vm.stopScan() else vm.startImuScan()
-        }
+//        binding.btnScanImu.setOnClickListener {
+//            if (vm.isScanning.value) vm.stopScan() else vm.startImuScan()
+//        }
 
         binding.btnScanGps.setOnClickListener {
             if (vm.isScanning.value) vm.stopScan() else vm.startGpsScan()
@@ -333,7 +333,7 @@ class MainActivity : AppCompatActivity() {
                     vm.isScanning.collectLatest { scanning ->
                         binding.btnScan.text = if (scanning) "Stop Scan" else "Scan for Motor"
                         binding.btnScanRemote.text = if (scanning) "Stop Scan" else "Scan for Remote"
-                        binding.btnScanImu.text = if (scanning) "Stop Scan" else "Scan for Heading"
+                        //binding.btnScanImu.text = if (scanning) "Stop Scan" else "Scan for Heading"
                         binding.btnScanGps.text = if (scanning) "Stop Scan" else "Scan for GPS"
                         binding.scanProgress.visibility = if (scanning) View.VISIBLE else View.GONE
                         binding.switchScanAll.isEnabled = !scanning

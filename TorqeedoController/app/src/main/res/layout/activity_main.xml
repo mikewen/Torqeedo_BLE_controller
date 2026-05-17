@@ -210,13 +210,13 @@
             android:text="Scan for GPS"
             android:layout_marginBottom="8dp" />
 
-        <Button
-            android:id="@+id/btnScanImu"
-            style="@style/Widget.TorqeedoController.Button.Secondary"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:text="Scan for Heading"
-            android:layout_marginBottom="16dp" />
+<!--        <Button-->
+<!--            android:id="@+id/btnScanImu"-->
+<!--            style="@style/Widget.TorqeedoController.Button.Secondary"-->
+<!--            android:layout_width="match_parent"-->
+<!--            android:layout_height="48dp"-->
+<!--            android:text="Scan for Heading"-->
+<!--            android:layout_marginBottom="16dp" />-->
 
         <LinearLayout
             android:layout_width="match_parent"
