@@ -22,6 +22,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.snackbar.Snackbar
 import com.torqeedo.controller.R
+import com.torqeedo.controller.ble.Direction
 import com.torqeedo.controller.ble.TorqeedoBleManager
 import com.torqeedo.controller.databinding.ActivityMainBinding
 import com.torqeedo.controller.viewmodel.MainViewModel
@@ -91,7 +92,7 @@ class MainActivity : AppCompatActivity() {
 
         // Direction Switch
         binding.switchDirection.setOnCheckedChangeListener { _, isChecked ->
-            vm.setDirection(if (isChecked) MainViewModel.Direction.REVERSE else MainViewModel.Direction.FORWARD)
+            vm.setDirection(if (isChecked) Direction.REVERSE else Direction.FORWARD)
         }
 
         // Speed Increase Button
@@ -232,9 +233,7 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     combine(vm.motorConnectionState, vm.imuConnectionState, vm.gpsConnectionState, vm.remoteConnected) { motor, imu, gps, remote ->
                         val motorConnected = motor == TorqeedoBleManager.ConnectionState.CONNECTED
-                        val imuConnected = imu == TorqeedoBleManager.ConnectionState.CONNECTED
-                        val gpsConnected = gps == TorqeedoBleManager.ConnectionState.CONNECTED
-                        val anyConnected = motorConnected || imuConnected || gpsConnected || remote
+                        val anyConnected = motorConnected || imu == TorqeedoBleManager.ConnectionState.CONNECTED || gps == TorqeedoBleManager.ConnectionState.CONNECTED || remote
                         Pair(anyConnected, motorConnected)
                     }.collectLatest { (anyConnected, motorConnected) ->
                         binding.controlPanel.visibility = if (motorConnected) View.VISIBLE else View.GONE
@@ -481,7 +480,7 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     vm.direction.collectLatest { dir ->
                         binding.tvDirectionLabel.text = dir.name
-                        binding.switchDirection.isChecked = (dir == MainViewModel.Direction.REVERSE)
+                        binding.switchDirection.isChecked = (dir == Direction.REVERSE)
                         updateSpeedColor(vm.speedMagnitude.value)
                     }
                 }
@@ -499,7 +498,7 @@ class MainActivity : AppCompatActivity() {
     private fun updateSpeedColor(magnitude: Int) {
         val color = if (magnitude == 0) {
             R.color.text_secondary
-        } else if (vm.direction.value == MainViewModel.Direction.FORWARD) {
+        } else if (vm.direction.value == Direction.FORWARD) {
             R.color.status_connected
         } else {
             R.color.status_connecting

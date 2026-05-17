@@ -12,6 +12,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.torqeedo.controller.R
+import com.torqeedo.controller.ble.SeaState
 import com.torqeedo.controller.databinding.ActivityAutopilotBinding
 import com.torqeedo.controller.viewmodel.MainViewModel
 import kotlinx.coroutines.flow.collectLatest
@@ -161,9 +162,9 @@ class AutoPilotActivity : AppCompatActivity() {
                     vm.seaState.collectLatest { state ->
                         binding.tvSeaState.text = state.name
                         val color = when (state) {
-                            MainViewModel.SeaState.CALM -> R.color.status_connected
-                            MainViewModel.SeaState.MODERATE -> R.color.accent_primary
-                            MainViewModel.SeaState.ROUGH -> R.color.status_disconnected
+                            SeaState.CALM -> R.color.status_connected
+                            SeaState.MODERATE -> R.color.accent_primary
+                            SeaState.ROUGH -> R.color.status_disconnected
                         }
                         binding.tvSeaState.setTextColor(ContextCompat.getColor(this@AutoPilotActivity, color))
                     }
