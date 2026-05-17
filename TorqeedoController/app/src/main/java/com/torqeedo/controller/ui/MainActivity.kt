@@ -80,6 +80,9 @@ class MainActivity : AppCompatActivity() {
         binding.switchShowMotorStatus.setOnCheckedChangeListener { _, isChecked ->
             vm.setShowMotorStatus(isChecked)
         }
+        binding.switchQmcLpf.setOnCheckedChangeListener { _, isChecked ->
+            vm.setQmcLpfEnabled(isChecked)
+        }
 
         // Scan Settings
         binding.switchScanAll.setOnCheckedChangeListener { _, isChecked ->
@@ -360,6 +363,12 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     vm.enableVoicePrompts.collectLatest { enabled ->
                         binding.switchVoice.isChecked = enabled
+                    }
+                }
+
+                launch {
+                    vm.qmcLpfEnabled.collectLatest { enabled ->
+                        binding.switchQmcLpf.isChecked = enabled
                     }
                 }
 
