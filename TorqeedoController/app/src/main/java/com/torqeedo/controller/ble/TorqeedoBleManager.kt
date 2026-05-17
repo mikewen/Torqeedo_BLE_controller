@@ -42,9 +42,10 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         val SERVICE_WIT_UUID: UUID = UUID.fromString("0000ffe0-0000-1000-8000-00805f9b34fb")
         val CHAR_WIT_UUID: UUID    = UUID.fromString("0000ffe1-0000-1000-8000-00805f9b34fb")
 
-        private const val MMC5603_HEADER: Byte = 0xA5.toByte() // Note: 0xA5 was used for MMC5603 (11 bytes), now also used for QMC6308 (8 bytes)
+        private const val MMC5603_HEADER: Byte = 0xA5.toByte()
         private const val QMC6308_HEADER: Byte = 0xA5.toByte()
-        //private const val WIT_HEADER: Byte = 0x55.toByte()
+        private const val IMU_A1_HEADER: Byte = 0xA1.toByte()
+        private const val GNSS_A2_HEADER: Byte = 0xA2.toByte()
         private const val GPS_HEADER: Byte = 0xA3.toByte()
         private const val STEER_SENSOR_HEADER: Byte = 0xA8.toByte()
     }
@@ -143,6 +144,12 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
     private val _bleGpsData = MutableSharedFlow<ByteArray>(replay = 1)
     val bleGpsData: SharedFlow<ByteArray> = _bleGpsData.asSharedFlow()
 
+    private val _imuA1Data = MutableSharedFlow<ByteArray>(replay = 1)
+    val imuA1Data: SharedFlow<ByteArray> = _imuA1Data.asSharedFlow()
+
+    private val _gnssA2Data = MutableSharedFlow<ByteArray>(replay = 1)
+    val gnssA2Data: SharedFlow<ByteArray> = _gnssA2Data.asSharedFlow()
+
     private val _steerSensorData = MutableSharedFlow<TorqeedoProtocol.SteerSensorData>(replay = 1)
     val steerSensorData: SharedFlow<TorqeedoProtocol.SteerSensorData> = _steerSensorData.asSharedFlow()
 
@@ -202,12 +209,12 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         while (rxBuffer.isNotEmpty()) {
             val idxAC = rxBuffer.indexOf(TorqeedoProtocol.HEADER)
             val idxA5 = rxBuffer.indexOf(QMC6308_HEADER)
-            //val idx55 = rxBuffer.indexOf(WIT_HEADER)
+            val idxA1 = rxBuffer.indexOf(IMU_A1_HEADER)
+            val idxA2 = rxBuffer.indexOf(GNSS_A2_HEADER)
             val idxA3 = rxBuffer.indexOf(GPS_HEADER)
             val idxA8 = rxBuffer.indexOf(STEER_SENSOR_HEADER)
 
-            //val startIdx = listOf(idxAC, idxA5, idx55, idxA3, idxA8).filter { it != -1 }.minOrNull() ?: -1
-            val startIdx = listOf(idxAC, idxA5, idxA3, idxA8).filter { it != -1 }.minOrNull() ?: -1
+            val startIdx = listOf(idxAC, idxA5, idxA1, idxA2, idxA3, idxA8).filter { it != -1 }.minOrNull() ?: -1
 
             if (startIdx == -1) {
                 if (rxBuffer.size > 1024) rxBuffer.clear()
@@ -222,25 +229,16 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
 
             when (header) {
                 QMC6308_HEADER -> {
-                    // QMC6308 is 8 bytes, MMC5603 is 11 bytes. Both start with 0xA5.
-                    // We can try to peek and see if we have enough for 11, or if it looks like an 8-byte packet.
-                    // Given the request specifically says 8-byte BLE packet for QMC6308:
                     if (rxBuffer.size >= 11) {
-                        // Check if it's potentially an 11-byte MMC5603 packet
-                        // (Usually MMC5603 has specific ranges, but here we prioritize QMC6308 if it's 8 bytes)
-                        // Actually, if we have at least 8 bytes, we can try parsing as QMC.
-                        // If we have 11 bytes, we might have an MMC packet.
-                        // Let's look at the next header to decide if it was 8 or 11.
-                        
                         var packetLen = 8
                         if (rxBuffer.size > 8) {
                             val nextHeader = rxBuffer[8]
                             if (nextHeader != TorqeedoProtocol.HEADER && 
                                 nextHeader != QMC6308_HEADER && 
-                                //nextHeader != WIT_HEADER &&
+                                nextHeader != IMU_A1_HEADER &&
+                                nextHeader != GNSS_A2_HEADER &&
                                 nextHeader != GPS_HEADER && 
                                 nextHeader != STEER_SENSOR_HEADER) {
-                                // If 9th byte is not a header, maybe it's the 11-byte MMC packet
                                 packetLen = 11
                             }
                         }
@@ -255,7 +253,6 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                                 _rawStatusFlow.tryEmit(frame)
                             }
                         } else {
-                            // Parse as 8-byte QMC6308
                             val frame = rxBuffer.take(8).toByteArray()
                             repeat(8) { rxBuffer.removeAt(0) }
                             TorqeedoProtocol.parseQmc6308(frame)?.let { data ->
@@ -267,8 +264,6 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                             }
                         }
                     } else if (rxBuffer.size >= 8) {
-                        // If we only have between 8 and 10 bytes, it must be QMC (or we're waiting for MMC)
-                        // For now, assume QMC if we see 0xA5 and have 8 bytes.
                         val frame = rxBuffer.take(8).toByteArray()
                         repeat(8) { rxBuffer.removeAt(0) }
                         TorqeedoProtocol.parseQmc6308(frame)?.let { data ->
@@ -282,37 +277,35 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                         return
                     }
                 }
-//                WIT_HEADER -> {
-//                    // WitMotion packet can be 11 bytes (serial) or 20 bytes (BLE 5.0)
-//                    if (rxBuffer.size >= 2) {
-//                        val type = rxBuffer[1].toInt() and 0xFF
-//                        val len = if (type == 0x61) 20 else 11
-//
-//                        if (rxBuffer.size >= len) {
-//                            val frame = rxBuffer.take(len).toByteArray()
-//                            repeat(len) { rxBuffer.removeAt(0) }
-//
-//                            _witMotionData.tryEmit(frame)
-//
-//                            if (isRawDataEnabled) {
-//                                logToFile("RECV_WIT", frame)
-//                                _rawStatusFlow.tryEmit(frame)
-//                            }
-//                        } else {
-//                            return // Wait for more data
-//                        }
-//                    } else {
-//                        return // Wait for type byte
-//                    }
-//                }
+                IMU_A1_HEADER -> {
+                    // A1 packet is 19 bytes: [0xA1, ax*2, ay*2, az*2, gx*2, gy*2, gz*2, mx*2, my*2, mz*2]
+                    if (rxBuffer.size >= 19) {
+                        val frame = rxBuffer.take(19).toByteArray()
+                        repeat(19) { rxBuffer.removeAt(0) }
+                        _imuA1Data.tryEmit(frame)
+                        if (isRawDataEnabled) {
+                            logToFile("RECV_IMU_A1", frame)
+                            _rawStatusFlow.tryEmit(frame)
+                        }
+                    } else return
+                }
+                GNSS_A2_HEADER -> {
+                    // A2 packet is 13 bytes: [0xA2, hdg*2, pitch*2, roll*2, acc*2, base*2, qual, sats]
+                    if (rxBuffer.size >= 13) {
+                        val frame = rxBuffer.take(13).toByteArray()
+                        repeat(13) { rxBuffer.removeAt(0) }
+                        _gnssA2Data.tryEmit(frame)
+                        if (isRawDataEnabled) {
+                            logToFile("RECV_GNSS_A2", frame)
+                            _rawStatusFlow.tryEmit(frame)
+                        }
+                    } else return
+                }
                 GPS_HEADER -> {
-                    // GPS packet is 17 bytes: [0xA3, Time x 4, Lat x 4, Lon x 4, Spd x 2, Cog x 2]
                     if (rxBuffer.size >= 17) {
                         val frame = rxBuffer.take(17).toByteArray()
                         repeat(17) { rxBuffer.removeAt(0) }
-                        
                         _bleGpsData.tryEmit(frame)
-
                         if (isRawDataEnabled) {
                             logToFile("RECV_GPS", frame)
                             _rawStatusFlow.tryEmit(frame)
@@ -322,15 +315,12 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                     }
                 }
                 STEER_SENSOR_HEADER -> {
-                    // Steer sensor packet is 7 bytes: [0xA8, S1L, S1H, S2L, S2H, VCCL, VCCH]
                     if (rxBuffer.size >= 7) {
                         val frame = rxBuffer.take(7).toByteArray()
                         repeat(7) { rxBuffer.removeAt(0) }
-                        
                         TorqeedoProtocol.parseSteerSensor(frame)?.let { data ->
                             _steerSensorData.tryEmit(data)
                         }
-
                         if (isRawDataEnabled) {
                             logToFile("RECV_STEER_SENSOR", frame)
                             _rawStatusFlow.tryEmit(frame)
@@ -340,13 +330,13 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                     }
                 }
                 else -> {
-                    // TQ Bus logic (0xAC)
                     var frameEndIdx = -1
                     for (i in 1 until rxBuffer.size) {
                         if (rxBuffer[i] == TorqeedoProtocol.HEADER ||
                             rxBuffer[i] == TorqeedoProtocol.FOOTER ||
                             rxBuffer[i] == QMC6308_HEADER ||
-                            //rxBuffer[i] == WIT_HEADER ||
+                            rxBuffer[i] == IMU_A1_HEADER ||
+                            rxBuffer[i] == GNSS_A2_HEADER ||
                             rxBuffer[i] == GPS_HEADER ||
                             rxBuffer[i] == STEER_SENSOR_HEADER) {
                             frameEndIdx = i
@@ -402,14 +392,9 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
     }
 
     fun sendDrive(speed: Int) {
-        //if (ae10Char == null) {
-        //    Log.e("BLE_ERROR", "CRITICAL: ae10Char is NULL! Write aborted.")
-        //}
-
         val char = ae10Char ?: return
         val frame = TorqeedoProtocol.buildDrive(speed)
         logToFile("SEND_DRIVE", frame)
-        //Log.d("SEND_DRIVE", "Send data to AE10")
         writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue()
     }
 
@@ -461,19 +446,15 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         }.enqueue()
     }
 
-    fun sendWitCalibration(type: Byte) {
-        val char = ae02Char ?: return
-        // WitMotion unlock command: FF AA 69 88 B5
-        val unlock = byteArrayOf(0xFF.toByte(), 0xAA.toByte(), 0x69.toByte(), 0x88.toByte(), 0xB5.toByte())
-        // WitMotion calibration command: FF AA 01 [type] 00
-        val calib = byteArrayOf(0xFF.toByte(), 0xAA.toByte(), 0x01.toByte(), type, 0x00.toByte())
-
-        logToFile("SEND_WIT_UNLOCK", unlock)
-        writeCharacteristic(char, unlock, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE).enqueue()
-
-        logToFile("SEND_WIT_CALIB", calib)
-        writeCharacteristic(char, calib, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE).enqueue()
-    }
+//    fun sendWitCalibration(type: Byte) {
+//        val char = ae02Char ?: return
+//        val unlock = byteArrayOf(0xFF.toByte(), 0xAA.toByte(), 0x69.toByte(), 0x88.toByte(), 0xB5.toByte())
+//        val calib = byteArrayOf(0xFF.toByte(), 0xAA.toByte(), 0x01.toByte(), type, 0x00.toByte())
+//        logToFile("SEND_WIT_UNLOCK", unlock)
+//        writeCharacteristic(char, unlock, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE).enqueue()
+//        logToFile("SEND_WIT_CALIB", calib)
+//        writeCharacteristic(char, calib, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE).enqueue()
+//    }
 
     enum class ConnectionState { DISCONNECTED, CONNECTING, CONNECTED }
 }

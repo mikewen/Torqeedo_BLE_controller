@@ -14,6 +14,7 @@ import androidx.lifecycle.viewModelScope
 import com.google.android.gms.location.*
 import com.torqeedo.controller.ble.*
 import com.torqeedo.controller.protocol.MagEllipseCalibrator
+import com.torqeedo.controller.protocol.SensorFusion
 import com.torqeedo.controller.protocol.SteerSensorProcessor
 import com.torqeedo.controller.protocol.TorqeedoProtocol
 import kotlinx.coroutines.delay
@@ -274,6 +275,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _imuCalibStatus = MutableStateFlow("Idle")
     val imuCalibStatus: StateFlow<String> = _imuCalibStatus.asStateFlow()
 
+    // --- Sensor Fusion ---
+    private val sensorFusion = SensorFusion()
+    private val _fusedState = MutableStateFlow(SensorFusion.FusedState())
+    val fusedState: StateFlow<SensorFusion.FusedState> = _fusedState.asStateFlow()
+
     init {
         setupSync()
         setupMagnetometer()
@@ -282,6 +288,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         setupWitMotion()
         setupBleGps()
         setupAutoCalibration()
+        setupSensorFusion()
 
         // Sync Managers with Prefs
         motorManager.setRawDataEnabled(_showRawData.value)
@@ -426,11 +433,71 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 BleRepository.setCurrentLocation(GeoPoint(lat, lon))
                 motorManager.updateGpsInfo(lat, lon, speed, course); gpsManager.updateGpsInfo(lat, lon, speed, course)
                 val decl = GeomagneticField(lat.toFloat(), lon.toFloat(), 0f, System.currentTimeMillis()).declination
-                if (abs(_declination.value - decl) > 0.1f) { _declination.value = decl; prefs.edit().putFloat(KEY_DECLINATION, decl).apply() }
+                if (abs(_declination.value - decl) > 0.1f) { 
+                    _declination.value = decl
+                    prefs.edit().putFloat(KEY_DECLINATION, decl).apply()
+                    sensorFusion.setDeclination(decl)
+                }
+                
+                // Also feed SensorFusion A3
+                sensorFusion.processA3(lat, lon, speed, course.toFloat(), true, System.currentTimeMillis())
             }
         }
         viewModelScope.launch { motorManager.bleGpsData.collect { process(it) } }
         viewModelScope.launch { gpsManager.bleGpsData.collect { process(it) } }
+    }
+
+    private fun setupSensorFusion() {
+        sensorFusion.onFusedHeading = { state ->
+            _fusedState.value = state
+            // If SensorFusion has a valid heading, use it as the primary heading
+            if (state.hasHeading) {
+                _witYaw.value = state.headingDeg
+                // We clear declination and offset because SensorFusion already applies them
+                _declination.value = 0f
+                _headingOffset.value = 0f
+            }
+            if (state.hasFix) {
+                BleRepository.setCurrentLocation(GeoPoint(state.latDeg, state.lonDeg))
+                _gpsSpeedKnots.value = state.speedKnots
+            }
+        }
+
+        // Initialize declination from prefs
+        sensorFusion.setDeclination(prefs.getFloat(KEY_DECLINATION, 0f))
+
+        val processA1: (ByteArray) -> Unit = { frame ->
+            if (frame.size >= 19) {
+                val ax = readS16LE(frame, 1).toShort()
+                val ay = readS16LE(frame, 3).toShort()
+                val az = readS16LE(frame, 5).toShort()
+                val gx = readS16LE(frame, 7).toShort()
+                val gy = readS16LE(frame, 9).toShort()
+                val gz = readS16LE(frame, 11).toShort()
+                val mx = readS16LE(frame, 13).toShort()
+                val my = readS16LE(frame, 15).toShort()
+                val mz = readS16LE(frame, 17).toShort()
+                sensorFusion.processA1(ax, ay, az, gx, gy, gz, mx, my, mz, System.currentTimeMillis())
+            }
+        }
+
+        val processA2: (ByteArray) -> Unit = { frame ->
+            if (frame.size >= 13) {
+                val hdg = readU16LE(frame, 1) / 100f
+                val pitch = readS16LE(frame, 3) / 100f
+                val roll = readS16LE(frame, 5) / 100f
+                val acc = readU16LE(frame, 7) / 100f
+                val base = readU16LE(frame, 9) / 1000f
+                val qual = frame[11].toInt() and 0xFF
+                val sats = frame[12].toInt() and 0xFF
+                sensorFusion.processA2(hdg, pitch, roll, acc, base, qual, sats, System.currentTimeMillis())
+            }
+        }
+
+        viewModelScope.launch { motorManager.imuA1Data.collect { processA1(it) } }
+        viewModelScope.launch { gpsManager.imuA1Data.collect { processA1(it) } }
+        viewModelScope.launch { motorManager.gnssA2Data.collect { processA2(it) } }
+        viewModelScope.launch { gpsManager.gnssA2Data.collect { processA2(it) } }
     }
 
     private fun setupAutoCalibration() {
@@ -512,7 +579,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             BleRepository.setCurrentLocation(GeoPoint(loc.latitude, loc.longitude))
             motorManager.updateGpsInfo(loc.latitude, loc.longitude, _gpsSpeedKnots.value, _gpsCourse.value)
             val d = GeomagneticField(loc.latitude.toFloat(), loc.longitude.toFloat(), loc.altitude.toFloat(), System.currentTimeMillis()).declination
-            if (abs(_declination.value - d) > 0.1f) { _declination.value = d; prefs.edit().putFloat(KEY_DECLINATION, d).apply() }
+            if (abs(_declination.value - d) > 0.1f) { 
+                _declination.value = d
+                prefs.edit().putFloat(KEY_DECLINATION, d).apply() 
+                sensorFusion.setDeclination(d)
+            }
         }
     }
 
@@ -606,9 +677,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         while (abs(_steerSensorAngle.value - target) > 2.0f && System.currentTimeMillis() - start < 5000L) { BleRepository.adjustSteer(if (target > _steerSensorAngle.value) 1 else -1); delay(100) }
     }
 
-    fun startImuGyroCalibration() = imuManager.sendWitCalibration(0x01).also { _imuCalibStatus.value = "Gyro..." }
-    fun startImuMagCalibration() = imuManager.sendWitCalibration(0x02).also { _imuCalibStatus.value = "Mag..." }
-    fun saveImuCalibration() = imuManager.sendWitCalibration(0x00).also { _imuCalibStatus.value = "Idle" }
+//    fun startImuGyroCalibration() = imuManager.sendWitCalibration(0x01).also { _imuCalibStatus.value = "Gyro..." }
+//    fun startImuMagCalibration() = imuManager.sendWitCalibration(0x02).also { _imuCalibStatus.value = "Mag..." }
+//    fun saveImuCalibration() = imuManager.sendWitCalibration(0x00).also { _imuCalibStatus.value = "Idle" }
     fun resetHeadingOffset() = _headingOffset.value.let { _headingOffset.value = 0f; prefs.edit().remove(KEY_HEADING_OFFSET).apply() }
     fun disconnectRemote() = prefs.edit().remove(KEY_REMOTE_MAC).apply().also { remote.disconnect().enqueue() }
 
@@ -636,4 +707,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun readS32LE(d: ByteArray, o: Int) = if (o + 3 >= d.size) 0 else (d[o].toInt() and 0xFF) or ((d[o+1].toInt() and 0xFF) shl 8) or ((d[o+2].toInt() and 0xFF) shl 16) or ((d[o+3].toInt() and 0xFF) shl 24)
     private fun readU16LE(d: ByteArray, o: Int) = if (o + 1 >= d.size) 0 else (d[o].toInt() and 0xFF) or ((d[o+1].toInt() and 0xFF) shl 8)
+    private fun readS16LE(d: ByteArray, o: Int) = if (o + 1 >= d.size) 0 else ((d[o].toInt() and 0xFF) or ((d[o+1].toInt() and 0xFF) shl 8)).toShort().toInt()
 }
