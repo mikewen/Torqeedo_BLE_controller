@@ -120,7 +120,7 @@ class LookbonRemote(context: Context) : BleManager(context) {
             event == 'C' && btn == 7 -> { lHeld = false; emit(Command.STOP_REPEAT); return }
 
             // @ button (Center)
-            // event == 'A' && btn == 1 -> emit(Command.STOP) // Redundant with 'B'
+            event == 'A' && btn == 1 -> emit(Command.STOP) // Redundant with 'B'
             event == 'B' && btn == 1 -> emit(Command.STOP)
 
             // Button A (Right) - Steering
@@ -147,8 +147,11 @@ class LookbonRemote(context: Context) : BleManager(context) {
                 emit(Command.STOP_REPEAT)
             }
 
-            // Fallback for single clicks (A event) - Only used for buttons without B/C handlers
-            // Buttons 1-5 already have B handlers, so we avoid A to prevent double-triggering.
+            // Fallback for single clicks (A event)
+            event == 'A' && btn == 2 -> emit(Command.STEER_RIGHT)
+            event == 'A' && btn == 3 -> emit(Command.STEER_LEFT)
+            event == 'A' && btn == 4 -> if (rHeld) emit(Command.SPEED_UP_FAST) else emit(Command.SPEED_UP)
+            event == 'A' && btn == 5 -> if (rHeld) emit(Command.SPEED_DOWN_FAST) else emit(Command.SPEED_DOWN)
         }
     }
 
