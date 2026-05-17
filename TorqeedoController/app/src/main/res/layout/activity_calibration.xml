@@ -48,151 +48,6 @@
             android:orientation="vertical"
             android:padding="16dp">
 
-            <!-- Hall Steer Sensor Card -->
-            <androidx.cardview.widget.CardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="16dp"
-                app:cardBackgroundColor="@color/bg_surface"
-                app:cardCornerRadius="12dp"
-                app:cardElevation="0dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="HALL STEER SENSOR"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="12sp"
-                        android:letterSpacing="0.1"
-                        android:layout_marginBottom="12dp" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:layout_marginBottom="12dp">
-
-                        <TextView android:id="@+id/tvHallA"
-                            android:layout_width="0dp" android:layout_height="wrap_content"
-                            android:layout_weight="1" android:text="A: 0"
-                            android:textColor="@color/text_primary" android:textSize="12sp" />
-                        <TextView android:id="@+id/tvHallB"
-                            android:layout_width="0dp" android:layout_height="wrap_content"
-                            android:layout_weight="1" android:text="B: 0"
-                            android:textColor="@color/text_primary" android:textSize="12sp" />
-                        <TextView android:id="@+id/tvHallRatio"
-                            android:layout_width="0dp" android:layout_height="wrap_content"
-                            android:layout_weight="1" android:text="R: 0.0"
-                            android:textColor="@color/text_primary" android:textSize="12sp" />
-                    </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/tvHallAngle"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Angle: 0.0°"
-                        android:textColor="@color/accent_primary"
-                        android:textSize="24sp"
-                        android:gravity="center"
-                        android:fontFamily="sans-serif-medium"
-                        android:layout_marginBottom="16dp" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Manual Drive"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="10sp"
-                        android:layout_marginBottom="4dp" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:layout_marginBottom="12dp">
-                        <Button android:id="@+id/btnSteerLeft" style="@style/Widget.TorqeedoController.Button.Secondary"
-                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                            android:text="Drive Left" android:layout_marginEnd="4dp"/>
-                        <Button android:id="@+id/btnSteerRight" style="@style/Widget.TorqeedoController.Button.Secondary"
-                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                            android:text="Drive Right" />
-                    </LinearLayout>
-
-                    <Button
-                        android:id="@+id/btnCalibHallBias"
-                        style="@style/Widget.TorqeedoController.Button.Secondary"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="1. Calibrate BIAS (Magnet Removed)"
-                        android:layout_marginBottom="12dp"/>
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="2. Manual Points (Set Angle manually then click)"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="10sp"
-                        android:layout_marginBottom="4dp" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:layout_marginBottom="4dp">
-                        <Button android:id="@+id/btnSetPort35" style="@style/Widget.TorqeedoController.Button.Secondary"
-                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                            android:text="Port 35°" android:textSize="11sp" android:layout_marginEnd="4dp"/>
-                        <Button android:id="@+id/btnSetPort22" style="@style/Widget.TorqeedoController.Button.Secondary"
-                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                            android:text="Port 22.5°" android:textSize="11sp" android:layout_marginEnd="4dp"/>
-                        <Button android:id="@+id/btnSetCenter" style="@style/Widget.TorqeedoController.Button.Secondary"
-                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                            android:text="Center 0°" android:textSize="11sp" />
-                    </LinearLayout>
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:layout_marginBottom="12dp">
-                        <Button android:id="@+id/btnSetStbd22" style="@style/Widget.TorqeedoController.Button.Secondary"
-                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                            android:text="Stbd 22.5°" android:textSize="11sp" android:layout_marginEnd="4dp"/>
-                        <Button android:id="@+id/btnSetStbd35" style="@style/Widget.TorqeedoController.Button.Secondary"
-                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                            android:text="Stbd 35°" android:textSize="11sp" android:layout_marginEnd="4dp"/>
-                        <View android:layout_width="0dp" android:layout_height="0dp" android:layout_weight="1" />
-                    </LinearLayout>
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="3. Auto-Calibrate (Timed drive from 0 to 22.5)"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="10sp"
-                        android:layout_marginBottom="4dp" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal">
-                        <Button android:id="@+id/btnAutoCalibPort" style="@style/Widget.TorqeedoController.Button.Primary"
-                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                            android:text="Auto Port 22.5" android:layout_marginEnd="4dp"/>
-                        <Button android:id="@+id/btnAutoCalibStbd" style="@style/Widget.TorqeedoController.Button.Primary"
-                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                            android:text="Auto Stbd 22.5" />
-                    </LinearLayout>
-
-                </LinearLayout>
-            </androidx.cardview.widget.CardView>
-
             <!-- Rudder Calibration Card (MMC5603 Ellipse) -->
             <androidx.cardview.widget.CardView
                 android:layout_width="match_parent"
@@ -414,6 +269,151 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:text="Save \u0026 Finish" />
+
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- Hall Steer Sensor Card -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardBackgroundColor="@color/bg_surface"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="0dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="HALL STEER SENSOR"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp"
+                        android:letterSpacing="0.1"
+                        android:layout_marginBottom="12dp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="12dp">
+
+                        <TextView android:id="@+id/tvHallA"
+                            android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:text="A: 0"
+                            android:textColor="@color/text_primary" android:textSize="12sp" />
+                        <TextView android:id="@+id/tvHallB"
+                            android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:text="B: 0"
+                            android:textColor="@color/text_primary" android:textSize="12sp" />
+                        <TextView android:id="@+id/tvHallRatio"
+                            android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:text="R: 0.0"
+                            android:textColor="@color/text_primary" android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tvHallAngle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Angle: 0.0°"
+                        android:textColor="@color/accent_primary"
+                        android:textSize="24sp"
+                        android:gravity="center"
+                        android:fontFamily="sans-serif-medium"
+                        android:layout_marginBottom="16dp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Manual Drive"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="10sp"
+                        android:layout_marginBottom="4dp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="12dp">
+                        <Button android:id="@+id/btnSteerLeft" style="@style/Widget.TorqeedoController.Button.Secondary"
+                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                            android:text="Drive Left" android:layout_marginEnd="4dp"/>
+                        <Button android:id="@+id/btnSteerRight" style="@style/Widget.TorqeedoController.Button.Secondary"
+                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                            android:text="Drive Right" />
+                    </LinearLayout>
+
+                    <Button
+                        android:id="@+id/btnCalibHallBias"
+                        style="@style/Widget.TorqeedoController.Button.Secondary"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="1. Calibrate BIAS (Magnet Removed)"
+                        android:layout_marginBottom="12dp"/>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="2. Manual Points (Set Angle manually then click)"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="10sp"
+                        android:layout_marginBottom="4dp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="4dp">
+                        <Button android:id="@+id/btnSetPort35" style="@style/Widget.TorqeedoController.Button.Secondary"
+                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                            android:text="Port 35°" android:textSize="11sp" android:layout_marginEnd="4dp"/>
+                        <Button android:id="@+id/btnSetPort22" style="@style/Widget.TorqeedoController.Button.Secondary"
+                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                            android:text="Port 22.5°" android:textSize="11sp" android:layout_marginEnd="4dp"/>
+                        <Button android:id="@+id/btnSetCenter" style="@style/Widget.TorqeedoController.Button.Secondary"
+                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                            android:text="Center 0°" android:textSize="11sp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="12dp">
+                        <Button android:id="@+id/btnSetStbd22" style="@style/Widget.TorqeedoController.Button.Secondary"
+                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                            android:text="Stbd 22.5°" android:textSize="11sp" android:layout_marginEnd="4dp"/>
+                        <Button android:id="@+id/btnSetStbd35" style="@style/Widget.TorqeedoController.Button.Secondary"
+                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                            android:text="Stbd 35°" android:textSize="11sp" android:layout_marginEnd="4dp"/>
+                        <View android:layout_width="0dp" android:layout_height="0dp" android:layout_weight="1" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="3. Auto-Calibrate (Timed drive from 0 to 22.5)"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="10sp"
+                        android:layout_marginBottom="4dp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+                        <Button android:id="@+id/btnAutoCalibPort" style="@style/Widget.TorqeedoController.Button.Primary"
+                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                            android:text="Auto Port 22.5" android:layout_marginEnd="4dp"/>
+                        <Button android:id="@+id/btnAutoCalibStbd" style="@style/Widget.TorqeedoController.Button.Primary"
+                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                            android:text="Auto Stbd 22.5" />
+                    </LinearLayout>
 
                 </LinearLayout>
             </androidx.cardview.widget.CardView>

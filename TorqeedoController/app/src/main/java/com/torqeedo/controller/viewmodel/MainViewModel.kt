@@ -95,7 +95,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         private const val KEY_AP_KI = "ap_ki"
         private const val KEY_AP_KD = "ap_kd"
         private const val KEY_USE_RUDDER_SENSOR = "use_rudder_sensor"
-        
+        private const val KEY_QMC_LPF = "qmc_lpf"
+
         private const val DEFAULT_AP_KP = 2.5f
         private const val DEFAULT_AP_KI = 0.1f
         private const val DEFAULT_AP_KD = 1.0f
@@ -135,6 +136,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private val _steerScale = MutableStateFlow(prefs.getInt(KEY_STEER_SCALE, DEFAULT_STEER_SCALE))
     val steerScale: StateFlow<Int> = _steerScale.asStateFlow()
 
+    private val _qmcLpfEnabled = MutableStateFlow(prefs.getBoolean(KEY_QMC_LPF, false))
+    val qmcLpfEnabled: StateFlow<Boolean> = _qmcLpfEnabled.asStateFlow()
+
     private val bluetoothAdapter: BluetoothAdapter =
         (application.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
 
@@ -147,7 +151,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     val motorConnectionState: StateFlow<TorqeedoBleManager.ConnectionState> = motorManager.connectionState
     val imuConnectionState:   StateFlow<TorqeedoBleManager.ConnectionState> = imuManager.connectionState
     val gpsConnectionState:   StateFlow<TorqeedoBleManager.ConnectionState> = gpsManager.connectionState
-    
+
     private val _remoteConnected = MutableStateFlow(false)
     val remoteConnected: StateFlow<Boolean> = _remoteConnected.asStateFlow()
 
@@ -351,7 +355,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     private var steerRepeatJob: Job? = null
     private var resetSteerJob: Job? = null
     private var autoPilotJob: Job? = null
-    
+
     private var lastBleGpsUpdate = 0L
 
     private var tts: TextToSpeech? = TextToSpeech(application, this)
@@ -365,7 +369,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         setupWitMotion()
         setupBleGps()
         setupAutoCalibration()
-        
+
         // Initial setup for managers from persisted values
         motorManager.setRawDataEnabled(_showRawData.value)
         motorManager.setLoggingEnabled(_enableLogging.value)
@@ -415,7 +419,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     }
 
     private fun setupRemote() {
-        remote.onConnected = { 
+        remote.onConnected = {
             _remoteConnected.value = true
             speak("Remote connected")
             // Save MAC address for auto-reconnect
@@ -423,7 +427,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 prefs.edit().putString(KEY_REMOTE_MAC, mac).apply()
             }
         }
-        remote.onDisconnected = { 
+        remote.onDisconnected = {
             _remoteConnected.value = false
             speak("Remote disconnected")
         }
@@ -544,7 +548,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     _magX.value = xUnsigned - 524288
                     _magY.value = yUnsigned - 524288
                     _magZ.value = zUnsigned - 524288
-                    
+
                     if (_isMagCalibrating.value) {
                         magCalibrator.addSample(_magX.value.toFloat(), _magY.value.toFloat())
                     }
@@ -554,14 +558,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     }
 
     private fun setupQmc6308() {
+        var lpfX = 0f
+        var lpfY = 0f
+        var lpfZ = 0f
+        val alpha = 0.2f // LPF weight for new data
+
         viewModelScope.launch {
             motorManager.qmc6308Data.collect { data ->
-                _magX.value = data.x
-                _magY.value = data.y
-                _magZ.value = data.z
-                
+                if (_qmcLpfEnabled.value) {
+                    lpfX = (data.x * alpha) + (lpfX * (1f - alpha))
+                    lpfY = (data.y * alpha) + (lpfY * (1f - alpha))
+                    lpfZ = (data.z * alpha) + (lpfZ * (1f - alpha))
+                    _magX.value = lpfX.toInt()
+                    _magY.value = lpfY.toInt()
+                    _magZ.value = lpfZ.toInt()
+                } else {
+                    _magX.value = data.x
+                    _magY.value = data.y
+                    _magZ.value = data.z
+                    lpfX = data.x.toFloat()
+                    lpfY = data.y.toFloat()
+                    lpfZ = data.z.toFloat()
+                }
+
                 if (_isMagCalibrating.value) {
-                    magCalibrator.addSample(data.x.toFloat(), data.y.toFloat())
+                    magCalibrator.addSample(_magX.value.toFloat(), _magY.value.toFloat())
                 }
             }
         }
@@ -582,17 +603,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             imuManager.witMotionData.collect { frame ->
                 if (frame.size < 2) return@collect
                 val type = frame[1].toInt() and 0xFF
-                
+
                 when (type) {
                     0x53 -> { // Angle: Roll, Pitch, Yaw (11-byte frame)
                         if (frame.size < 11) return@collect
                         val rollRaw  = ((frame[3].toInt() shl 8) or (frame[2].toInt() and 0xFF)).toShort()
                         val pitchRaw = ((frame[5].toInt() shl 8) or (frame[4].toInt() and 0xFF)).toShort()
                         val yawRaw   = ((frame[7].toInt() shl 8) or (frame[6].toInt() and 0xFF)).toShort()
-                        
+
                         _witRoll.value  = rollRaw  / 32768f * 180f
                         _witPitch.value = pitchRaw / 32768f * 180f
-                        
+
                         // Invert yaw so CW turn increases degrees, and normalize to 0-360
                         var yaw = -(yawRaw / 32768f * 180f)
                         while (yaw < 0) yaw += 360f
@@ -614,10 +635,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                         val rollRaw  = ((frame[15].toInt() shl 8) or (frame[14].toInt() and 0xFF)).toShort()
                         val pitchRaw = ((frame[17].toInt() shl 8) or (frame[16].toInt() and 0xFF)).toShort()
                         val yawRaw   = ((frame[19].toInt() shl 8) or (frame[18].toInt() and 0xFF)).toShort()
-                        
+
                         _witRoll.value  = rollRaw  / 32768f * 180f
                         _witPitch.value = pitchRaw / 32768f * 180f
-                        
+
                         // Invert yaw so CW turn increases degrees, and normalize to 0-360
                         var yaw = -(yawRaw / 32768f * 180f)
                         while (yaw < 0) yaw += 360f
@@ -648,7 +669,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 _gpsSpeedKnots.value = speedKnots
                 _gpsCourse.value = course
                 BleRepository.setCurrentLocation(GeoPoint(lat, lon))
-                
+
                 motorManager.updateGpsInfo(lat, lon, speedKnots, course)
                 gpsManager.updateGpsInfo(lat, lon, speedKnots, course)
 
@@ -696,7 +717,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     var currentHdgNoOffset = yaw + decl
                     while (currentHdgNoOffset < 0) currentHdgNoOffset += 360f
                     while (currentHdgNoOffset >= 360) currentHdgNoOffset -= 360f
-                    
+
                     var diff = targetCog - currentHdgNoOffset
                     while (diff > 180f) diff -= 360f
                     while (diff < -180f) diff += 360f
@@ -710,9 +731,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                     var diff = targetOffset - currentOffset
                     while (diff > 180f) diff -= 360f
                     while (diff < -180f) diff += 360f
-                    
+
                     // Very slow adjustment (0.1% per update) to pull the offset toward target
-                    val newOffset = currentOffset + (diff * 0.001f) 
+                    val newOffset = currentOffset + (diff * 0.001f)
 
                     if (abs(newOffset - currentOffset) > 0.0001f) {
                         _headingOffset.value = newOffset
@@ -788,7 +809,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     fun connect(discovered: DiscoveredDevice) {
         val name = discovered.name
         val device = discovered.device
-        
+
         viewModelScope.launch {
             try {
                 when {
@@ -854,6 +875,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
     fun setUseRudderSensor(use: Boolean) {
         _useRudderSensor.value = use
         prefs.edit().putBoolean(KEY_USE_RUDDER_SENSOR, use).apply()
+    }
+
+    fun setQmcLpfEnabled(enabled: Boolean) {
+        _qmcLpfEnabled.value = enabled
+        prefs.edit().putBoolean(KEY_QMC_LPF, enabled).apply()
     }
 
     // ── Calibration ───────────────────────────────────────────────────────
@@ -1049,18 +1075,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
             moveToAngle(0f)
             delay(1000)
-            
+
             val startTime = System.currentTimeMillis()
             // Sample list: Triple(A, B, Time)
             val samples = mutableListOf<Triple<Float, Float, Long>>()
             samples.add(Triple(steerProcessor.getVectorA(_steerSensorA.value), steerProcessor.getVectorB(_steerSensorB.value), 0L))
 
             var timedOut = false
-            val timeout = 15000L 
-            
+            val timeout = 15000L
+
             val driveJob = launch {
                 while (true) {
-                    adjustSteer(-1) 
+                    adjustSteer(-1)
                     delay(50)
                 }
             }
@@ -1070,11 +1096,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 val curB = steerProcessor.getVectorB(_steerSensorB.value)
                 val now = System.currentTimeMillis() - startTime
                 samples.add(Triple(curA, curB, now))
-                
+
                 // Distance to target in vector space
                 val distToTarget = sqrt(((curA - targetA) * (curA - targetA) + (curB - targetB) * (curB - targetB)).toDouble())
                 if (distToTarget < 15.0) break // Reached target within tolerance
-                
+
                 if (now > timeout) {
                     timedOut = true
                     break
@@ -1082,7 +1108,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 delay(50)
             }
             driveJob.cancel()
-            
+
             if (!timedOut) {
                 val totalTime = samples.last().third
                 speak("Reached 22.5 degrees. Building LUT.")
@@ -1111,14 +1137,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
             moveToAngle(0f)
             delay(1000)
-            
+
             val startTime = System.currentTimeMillis()
             val samples = mutableListOf<Triple<Float, Float, Long>>()
             samples.add(Triple(steerProcessor.getVectorA(_steerSensorA.value), steerProcessor.getVectorB(_steerSensorB.value), 0L))
 
             var timedOut = false
             val timeout = 15000L
-            
+
             val driveJob = launch {
                 while (true) {
                     adjustSteer(1)
@@ -1131,10 +1157,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 val curB = steerProcessor.getVectorB(_steerSensorB.value)
                 val now = System.currentTimeMillis() - startTime
                 samples.add(Triple(curA, curB, now))
-                
+
                 val distToTarget = sqrt(((curA - targetA) * (curA - targetA) + (curB - targetB) * (curB - targetB)).toDouble())
                 if (distToTarget < 15.0) break
-                
+
                 if (now > timeout) {
                     timedOut = true
                     break
@@ -1142,7 +1168,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
                 delay(50)
             }
             driveJob.cancel()
-            
+
             if (!timedOut) {
                 val totalTime = samples.last().third
                 speak("Reached 22.5 degrees. Building LUT.")
@@ -1161,15 +1187,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     private fun getManualPoints(): List<Triple<Float, Float, Float>> {
         val points = mutableListOf<Triple<Float, Float, Float>>()
-        if (prefs.contains(KEY_VEC_A_CENTER)) 
+        if (prefs.contains(KEY_VEC_A_CENTER))
             points.add(Triple(prefs.getFloat(KEY_VEC_A_CENTER, 0f), prefs.getFloat(KEY_VEC_B_CENTER, 0f), 0f))
-        if (prefs.contains(KEY_VEC_A_PORT22)) 
+        if (prefs.contains(KEY_VEC_A_PORT22))
             points.add(Triple(prefs.getFloat(KEY_VEC_A_PORT22, 0f), prefs.getFloat(KEY_VEC_B_PORT22, 0f), -22.5f))
-        if (prefs.contains(KEY_VEC_A_PORT35)) 
+        if (prefs.contains(KEY_VEC_A_PORT35))
             points.add(Triple(prefs.getFloat(KEY_VEC_A_PORT35, 0f), prefs.getFloat(KEY_VEC_B_PORT35, 0f), -35f))
-        if (prefs.contains(KEY_VEC_A_STBD22)) 
+        if (prefs.contains(KEY_VEC_A_STBD22))
             points.add(Triple(prefs.getFloat(KEY_VEC_A_STBD22, 0f), prefs.getFloat(KEY_VEC_B_STBD22, 0f), 22.5f))
-        if (prefs.contains(KEY_VEC_A_STBD35)) 
+        if (prefs.contains(KEY_VEC_A_STBD35))
             points.add(Triple(prefs.getFloat(KEY_VEC_A_STBD35, 0f), prefs.getFloat(KEY_VEC_B_STBD35, 0f), 35f))
         return points
     }
@@ -1328,7 +1354,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         statusQueryJob?.cancel()
         statusQueryJob = null
     }
-    
+
     fun startSensorReadLoop() {
         sensorReadJob?.cancel()
         sensorReadJob = viewModelScope.launch {
@@ -1338,7 +1364,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
             }
         }
     }
-    
+
     fun stopSensorReadLoop() {
         sensorReadJob?.cancel()
         sensorReadJob = null
@@ -1496,7 +1522,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
 
     // ── Navigation ───────────────────────────────────────────────────────
     fun saveLocation(name: String) {
-        val loc = BleRepository.currentLocation.value ?: return
+        val loc = targetLocation.value ?: currentLocation.value ?: return
         val updated = BleRepository.waypoints.value.toMutableList()
         updated.add(Waypoint(name, loc))
         BleRepository.setWaypoints(updated)
@@ -1557,7 +1583,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), T
         stopGpsUpdates()
         tts?.shutdown()
     }
-    
+
     // Byte reading helpers for BLE GPS
     private fun readS32LE(data: ByteArray, offset: Int): Int {
         if (offset + 3 >= data.size) return 0
