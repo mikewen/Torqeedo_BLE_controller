@@ -126,6 +126,29 @@ class AutoPilotActivity : AppCompatActivity() {
             }
         }
 
+        // PID Tuning - Deadband
+        binding.sbDeadband.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) vm.setApDeadband(progress / 10f)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+        binding.etDeadband.setOnEditorActionListener { v, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                val value = v.text.toString().toFloatOrNull() ?: 0f
+                vm.setApDeadband(value.coerceIn(0f, 10f))
+                v.clearFocus()
+                true
+            } else false
+        }
+        binding.etDeadband.doAfterTextChanged { s ->
+            if (binding.etDeadband.hasFocus()) {
+                val value = s.toString().toFloatOrNull() ?: 0f
+                vm.setApDeadband(value)
+            }
+        }
+
         // Max Turn Rate Tuning
         binding.sbMaxRate.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
@@ -206,7 +229,7 @@ class AutoPilotActivity : AppCompatActivity() {
                 }
 
                 launch {
-                    combine(vm.witPitch, vm.witRoll) { pitch, roll ->
+                    combine(vm.IMUPitch, vm.IMURoll) { pitch, roll ->
                         "P: %.1f° R: %.1f°".format(pitch, roll)
                     }.collectLatest { text ->
                         binding.tvPitchRoll.text = text
@@ -243,6 +266,13 @@ class AutoPilotActivity : AppCompatActivity() {
                     vm.apKd.collectLatest { kd ->
                         if (!binding.etKd.hasFocus()) binding.etKd.setText("%.1f".format(kd))
                         binding.sbKd.progress = (kd * 10).toInt()
+                    }
+                }
+
+                launch {
+                    vm.apDeadband.collectLatest { db ->
+                        if (!binding.etDeadband.hasFocus()) binding.etDeadband.setText("%.1f".format(db))
+                        binding.sbDeadband.progress = (db * 10).toInt()
                     }
                 }
 

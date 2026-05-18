@@ -424,6 +424,36 @@
                             android:imeOptions="actionDone" />
                     </LinearLayout>
 
+                    <!-- Deadband -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="8dp">
+                        <TextView
+                            android:layout_width="40dp"
+                            android:layout_height="wrap_content"
+                            android:text="Db"
+                            android:textColor="@color/text_primary" />
+                        <SeekBar
+                            android:id="@+id/sbDeadband"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:max="100" />
+                        <EditText
+                            android:id="@+id/etDeadband"
+                            android:layout_width="60dp"
+                            android:layout_height="wrap_content"
+                            android:inputType="numberDecimal"
+                            android:gravity="center"
+                            android:textSize="14sp"
+                            android:background="@color/bg_primary"
+                            android:padding="4dp"
+                            android:imeOptions="actionDone" />
+                    </LinearLayout>
+
                     <!-- Max Turn Rate (Rate Limit) -->
                     <LinearLayout
                         android:layout_width="match_parent"

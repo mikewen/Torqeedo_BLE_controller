@@ -79,6 +79,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_AP_KP = "ap_kp"
         private const val KEY_AP_KI = "ap_ki"
         private const val KEY_AP_KD = "ap_kd"
+        private const val KEY_AP_DEADBAND = "ap_deadband"
         private const val KEY_AP_MAX_RATE = "ap_max_rate"
         private const val KEY_USE_RUDDER_SENSOR = "use_rudder_sensor"
         private const val KEY_QMC_LPF = "qmc_lpf"
@@ -92,6 +93,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val DEFAULT_AP_KP = 2.5f
         private const val DEFAULT_AP_KI = 0.1f
         private const val DEFAULT_AP_KD = 1.0f
+        private const val DEFAULT_AP_DEADBAND = 3.0f
         private const val DEFAULT_AP_MAX_RATE = 25f
 
         private const val KEY_WAYPOINTS = "waypoints_v3"
@@ -186,14 +188,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         steerProcessor.getRatio(a, b)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
 
-    private val _witRoll = MutableStateFlow(0f)
-    val witRoll: StateFlow<Float> = _witRoll.asStateFlow()
-    private val _witPitch = MutableStateFlow(0f)
-    val witPitch: StateFlow<Float> = _witPitch.asStateFlow()
-    private val _witYaw = MutableStateFlow(0f)
-    val witYaw: StateFlow<Float> = _witYaw.asStateFlow()
+    private val _IMURoll = MutableStateFlow(0f)
+    val IMURoll: StateFlow<Float> = _IMURoll.asStateFlow()
+    private val _IMUPitch = MutableStateFlow(0f)
+    val IMUPitch: StateFlow<Float> = _IMUPitch.asStateFlow()
+    private val _IMUYaw = MutableStateFlow(0f)
+    val IMUYaw: StateFlow<Float> = _IMUYaw.asStateFlow()
 
-    val seaState: StateFlow<SeaState> = combine(witRoll, witPitch) { roll, pitch ->
+    val seaState: StateFlow<SeaState> = combine(IMURoll, IMUPitch) { roll, pitch ->
         val maxDev = max(abs(roll), abs(pitch))
         when {
             maxDev < 3.0f -> SeaState.CALM
@@ -208,7 +210,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _headingOffset = MutableStateFlow(prefs.getFloat(KEY_HEADING_OFFSET, 0f))
     val headingOffset: StateFlow<Float> = _headingOffset.asStateFlow()
 
-    val trueHeading: StateFlow<Float> = combine(witYaw, declination, headingOffset) { yaw, decl, offset ->
+    val trueHeading: StateFlow<Float> = combine(IMUYaw, declination, headingOffset) { yaw, decl, offset ->
         var heading = yaw + decl + offset
         while (heading < 0) heading += 360f
         while (heading >= 360) heading -= 360f
@@ -282,6 +284,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val apKi: StateFlow<Float> = _apKi.asStateFlow()
     private val _apKd = MutableStateFlow(prefs.getFloat(KEY_AP_KD, DEFAULT_AP_KD))
     val apKd: StateFlow<Float> = _apKd.asStateFlow()
+    private val _apDeadband = MutableStateFlow(prefs.getFloat(KEY_AP_DEADBAND, DEFAULT_AP_DEADBAND))
+    val apDeadband: StateFlow<Float> = _apDeadband.asStateFlow()
     private val _apMaxRate = MutableStateFlow(prefs.getFloat(KEY_AP_MAX_RATE, DEFAULT_AP_MAX_RATE))
     val apMaxRate: StateFlow<Float> = _apMaxRate.asStateFlow()
     private val _useRudderSensor = MutableStateFlow(prefs.getBoolean(KEY_USE_RUDDER_SENSOR, false))
@@ -344,6 +348,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         BleRepository.apKp = _apKp.value
         BleRepository.apKi = _apKi.value
         BleRepository.apKd = _apKd.value
+        BleRepository.apDeadband = _apDeadband.value
         BleRepository.maxTurnRate = _apMaxRate.value
         BleRepository.useRudderSensor = _useRudderSensor.value
         
@@ -399,17 +404,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 when (type) {
                     0x53 -> {
                         if (frame.size < 11) return@collect
-                        _witRoll.value = ((frame[3].toInt() shl 8) or (frame[2].toInt() and 0xFF)).toShort() / 32768f * 180f
-                        _witPitch.value = ((frame[5].toInt() shl 8) or (frame[4].toInt() and 0xFF)).toShort() / 32768f * 180f
+                        _IMURoll.value = ((frame[3].toInt() shl 8) or (frame[2].toInt() and 0xFF)).toShort() / 32768f * 180f
+                        _IMUPitch.value = ((frame[5].toInt() shl 8) or (frame[4].toInt() and 0xFF)).toShort() / 32768f * 180f
                         var yaw = -(((frame[7].toInt() shl 8) or (frame[6].toInt() and 0xFF)).toShort() / 32768f * 180f)
-                        while (yaw < 0) yaw += 360f; while (yaw >= 360) yaw -= 360f; _witYaw.value = yaw
+                        while (yaw < 0) yaw += 360f; while (yaw >= 360) yaw -= 360f; _IMUYaw.value = yaw
                     }
                     0x61 -> {
                         if (frame.size < 20) return@collect
-                        _witRoll.value = ((frame[15].toInt() shl 8) or (frame[14].toInt() and 0xFF)).toShort() / 32768f * 180f
-                        _witPitch.value = ((frame[17].toInt() shl 8) or (frame[16].toInt() and 0xFF)).toShort() / 32768f * 180f
+                        _IMURoll.value = ((frame[15].toInt() shl 8) or (frame[14].toInt() and 0xFF)).toShort() / 32768f * 180f
+                        _IMUPitch.value = ((frame[17].toInt() shl 8) or (frame[16].toInt() and 0xFF)).toShort() / 32768f * 180f
                         var yaw = -(((frame[19].toInt() shl 8) or (frame[18].toInt() and 0xFF)).toShort() / 32768f * 180f)
-                        while (yaw < 0) yaw += 360f; while (yaw >= 360) yaw -= 360f; _witYaw.value = yaw
+                        while (yaw < 0) yaw += 360f; while (yaw >= 360) yaw -= 360f; _IMUYaw.value = yaw
                     }
                 }
             }
@@ -448,11 +453,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             // If SensorFusion has a valid heading, use it as the primary heading
             if (state.hasHeading) {
-                _witYaw.value = state.headingDeg
+                _IMUYaw.value = state.headingDeg
                 // We clear declination and offset because SensorFusion already applies them
                 _declination.value = 0f
                 _headingOffset.value = 0f
             }
+            _IMUPitch.value = state.pitchDeg
+            _IMURoll.value = state.rollDeg
+
             if (state.hasFix) {
                 BleRepository.setCurrentLocation(GeoPoint(state.latDeg, state.lonDeg))
                 _gpsSpeedKnots.value = state.speedKnots
@@ -528,7 +536,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun setupAutoCalibration() {
         viewModelScope.launch {
             val gpsStraightFlow = combine(gpsSpeedKnots, gpsCourse, rudderPosition) { s, c, r -> if (s > 3.5f && c != null && abs(r) < 2.0f) c.toFloat() else null }
-            combine(seaState, gpsStraightFlow, witYaw, declination) { s, tc, y, d ->
+            combine(seaState, gpsStraightFlow, IMUYaw, declination) { s, tc, y, d ->
                 if (s == SeaState.CALM && tc != null) {
                     var cur = y + d; while (cur < 0) cur += 360f; while (cur >= 360) cur -= 360f
                     var diff = tc - cur; while (diff > 180f) diff -= 360f; while (diff < -180f) diff += 360f; diff
@@ -604,7 +612,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             BleRepository.setCurrentLocation(GeoPoint(loc.latitude, loc.longitude))
             motorManager.updateGpsInfo(loc.latitude, loc.longitude, _gpsSpeedKnots.value.toFloat(), _gpsCourse.value)
             val d = GeomagneticField(loc.latitude.toFloat(), loc.longitude.toFloat(), loc.altitude.toFloat(), System.currentTimeMillis()).declination
-            if (abs(_declination.value - d) > 0.1f) { 
+            if (abs(_declination.value - d) > 0.1f) {
                 _declination.value = d
                 prefs.edit().putFloat(KEY_DECLINATION, d).apply() 
                 sensorFusion.setDeclination(d)
@@ -754,6 +762,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setApKp(v: Float) { _apKp.value = v; prefs.edit().putFloat(KEY_AP_KP, v).apply(); BleRepository.apKp = v }
     fun setApKi(v: Float) { _apKi.value = v; prefs.edit().putFloat(KEY_AP_KI, v).apply(); BleRepository.apKi = v }
     fun setApKd(v: Float) { _apKd.value = v; prefs.edit().putFloat(KEY_AP_KD, v).apply(); BleRepository.apKd = v }
+    fun setApDeadband(v: Float) { _apDeadband.value = v; prefs.edit().putFloat(KEY_AP_DEADBAND, v).apply(); BleRepository.apDeadband = v }
     fun setApMaxRate(v: Float) { _apMaxRate.value = v; prefs.edit().putFloat(KEY_AP_MAX_RATE, v).apply(); BleRepository.maxTurnRate = v }
     fun setUseRudderSensor(v: Boolean) { _useRudderSensor.value = v; prefs.edit().putBoolean(KEY_USE_RUDDER_SENSOR, v).apply(); BleRepository.useRudderSensor = v }
 

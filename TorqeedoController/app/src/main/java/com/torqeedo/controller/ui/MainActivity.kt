@@ -176,7 +176,7 @@ class MainActivity : AppCompatActivity() {
                 false
             }
         }
-        
+
         binding.etSteerScale.doAfterTextChanged { s ->
             if (binding.etSteerScale.hasFocus()) {
                 val value = s.toString().toIntOrNull() ?: 0
@@ -448,19 +448,19 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 launch {
-                    vm.witYaw.collectLatest { yaw ->
+                    vm.IMUYaw.collectLatest { yaw ->
                         binding.tvYaw.text = "%.1f°".format(yaw)
                     }
                 }
 
                 launch {
-                    vm.witPitch.collectLatest { pitch ->
+                    vm.IMUPitch.collectLatest { pitch ->
                         binding.tvPitch.text = "%.1f°".format(pitch)
                     }
                 }
 
                 launch {
-                    vm.witRoll.collectLatest { roll ->
+                    vm.IMURoll.collectLatest { roll ->
                         binding.tvRoll.text = "%.1f°".format(roll)
                     }
                 }
@@ -472,11 +472,16 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 launch {
-                    vm.gpsFix.collectLatest { hasFix ->
-                        binding.tvGpsStatus.text = if (hasFix) "GPS Fixed" else "Waiting for GPS fix…"
-                        binding.tvGpsStatus.setTextColor(ContextCompat.getColor(this@MainActivity,
-                            if (hasFix) R.color.status_connected else R.color.text_secondary))
-                    }
+                    combine(vm.gpsFix, vm.currentLocation) { hasFix, loc -> hasFix to loc }
+                        .collectLatest { (hasFix, loc) ->
+                            binding.tvGpsStatus.text = when {
+                                hasFix && loc != null -> "GPS Fixed (%.5f, %.5f)".format(loc.latitude, loc.longitude)
+                                hasFix -> "GPS Fixed"
+                                else -> "Waiting for GPS fix…"
+                            }
+                            binding.tvGpsStatus.setTextColor(ContextCompat.getColor(this@MainActivity,
+                                if (hasFix) R.color.status_connected else R.color.text_secondary))
+                        }
                 }
 
                 launch {

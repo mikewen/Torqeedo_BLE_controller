@@ -68,6 +68,7 @@ object BleRepository : TextToSpeech.OnInitListener {
     var apKp = 2.5f
     var apKi = 0.1f
     var apKd = 1.0f
+    var apDeadband = 3.0f
     var maxTurnRate = 25f
     var useRudderSensor = false
     var showMotorStatus = false
@@ -403,6 +404,11 @@ object BleRepository : TextToSpeech.OnInitListener {
         while (error > 180f) error -= 360f
         while (error < -180f) error += 360f
         
+        // Apply deadband
+        if (abs(error) < apDeadband) {
+            error = 0f
+        }
+
         autopilotIntegral = (autopilotIntegral + error).coerceIn(-AUTOPILOT_MAX_I, AUTOPILOT_MAX_I)
         
         val headingDerivative = error - autopilotLastError
