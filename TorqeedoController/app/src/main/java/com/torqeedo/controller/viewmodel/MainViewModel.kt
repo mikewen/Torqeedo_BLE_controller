@@ -79,6 +79,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_AP_KP = "ap_kp"
         private const val KEY_AP_KI = "ap_ki"
         private const val KEY_AP_KD = "ap_kd"
+        private const val KEY_AP_MAX_RATE = "ap_max_rate"
         private const val KEY_USE_RUDDER_SENSOR = "use_rudder_sensor"
         private const val KEY_QMC_LPF = "qmc_lpf"
 
@@ -91,6 +92,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val DEFAULT_AP_KP = 2.5f
         private const val DEFAULT_AP_KI = 0.1f
         private const val DEFAULT_AP_KD = 1.0f
+        private const val DEFAULT_AP_MAX_RATE = 25f
 
         private const val KEY_WAYPOINTS = "waypoints_v3"
         private const val KEY_SCAN_ALL = "scan_all_names"
@@ -280,6 +282,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val apKi: StateFlow<Float> = _apKi.asStateFlow()
     private val _apKd = MutableStateFlow(prefs.getFloat(KEY_AP_KD, DEFAULT_AP_KD))
     val apKd: StateFlow<Float> = _apKd.asStateFlow()
+    private val _apMaxRate = MutableStateFlow(prefs.getFloat(KEY_AP_MAX_RATE, DEFAULT_AP_MAX_RATE))
+    val apMaxRate: StateFlow<Float> = _apMaxRate.asStateFlow()
     private val _useRudderSensor = MutableStateFlow(prefs.getBoolean(KEY_USE_RUDDER_SENSOR, false))
     val useRudderSensor: StateFlow<Boolean> = _useRudderSensor.asStateFlow()
 
@@ -340,6 +344,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         BleRepository.apKp = _apKp.value
         BleRepository.apKi = _apKi.value
         BleRepository.apKd = _apKd.value
+        BleRepository.maxTurnRate = _apMaxRate.value
         BleRepository.useRudderSensor = _useRudderSensor.value
         
         viewModelScope.launch { trueHeading.collect { BleRepository.trueHeading.value = it } }
@@ -438,6 +443,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun setupSensorFusion() {
         sensorFusion.onFusedHeading = { state ->
             _fusedState.value = state
+            // Sync gyro rate to repository for autopilot damping/limiting
+            BleRepository.gyroZDegS.value = state.gyroZDegS
+
             // If SensorFusion has a valid heading, use it as the primary heading
             if (state.hasHeading) {
                 _witYaw.value = state.headingDeg
@@ -573,8 +581,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         BleRepository.stopSteerRepeat()
         viewModelScope.launch {
             while (BleRepository.steerValue.value != 0) {
-                val cur = BleRepository.steerValue.value
-                BleRepository.adjustSteer(if (cur > 0) -1 else 1)
+                val Councilor = BleRepository.steerValue.value
+                BleRepository.adjustSteer(if (Councilor > 0) -1 else 1)
                 delay(80L)
             }
         }
@@ -746,6 +754,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setApKp(v: Float) { _apKp.value = v; prefs.edit().putFloat(KEY_AP_KP, v).apply(); BleRepository.apKp = v }
     fun setApKi(v: Float) { _apKi.value = v; prefs.edit().putFloat(KEY_AP_KI, v).apply(); BleRepository.apKi = v }
     fun setApKd(v: Float) { _apKd.value = v; prefs.edit().putFloat(KEY_AP_KD, v).apply(); BleRepository.apKd = v }
+    fun setApMaxRate(v: Float) { _apMaxRate.value = v; prefs.edit().putFloat(KEY_AP_MAX_RATE, v).apply(); BleRepository.maxTurnRate = v }
     fun setUseRudderSensor(v: Boolean) { _useRudderSensor.value = v; prefs.edit().putBoolean(KEY_USE_RUDDER_SENSOR, v).apply(); BleRepository.useRudderSensor = v }
 
     // Helper methods for reading BLE data

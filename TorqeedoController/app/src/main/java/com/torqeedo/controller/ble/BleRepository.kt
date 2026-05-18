@@ -55,6 +55,8 @@ object BleRepository : TextToSpeech.OnInitListener {
 
     // --- Shared Sensor Data (Synced from Managers/ViewModels) ---
     val trueHeading = MutableStateFlow(0f)
+    val gyroZDegS = MutableStateFlow(0f)
+    var lastGyroUpdateTime = 0L
     val rudderPosition = MutableStateFlow(0f)
     val sensorCurrent = MutableStateFlow(0f)
 
@@ -66,6 +68,7 @@ object BleRepository : TextToSpeech.OnInitListener {
     var apKp = 2.5f
     var apKi = 0.1f
     var apKd = 1.0f
+    var maxTurnRate = 25f
     var useRudderSensor = false
     var showMotorStatus = false
     var enableVoicePrompts = true
@@ -394,16 +397,38 @@ object BleRepository : TextToSpeech.OnInitListener {
         
         val current = trueHeading.value
         val target = targetHeading.value
+        val currentRate = gyroZDegS.value
         
         var error = target - current
         while (error > 180f) error -= 360f
         while (error < -180f) error += 360f
         
         autopilotIntegral = (autopilotIntegral + error).coerceIn(-AUTOPILOT_MAX_I, AUTOPILOT_MAX_I)
-        val derivative = error - autopilotLastError
+        
+        val headingDerivative = error - autopilotLastError
         autopilotLastError = error
         
-        val output = (error * apKp) + (autopilotIntegral * apKi) + (derivative * apKd)
+        // Use gyro for D term if fresh (within 500ms), otherwise fallback to heading derivative
+        // Note: gyro rate is degrees/s, headingDerivative is degrees per AUTOPILOT_DELAY (200ms)
+        // We scale gyro to match the 'degrees-per-step' unit of the traditional derivative
+        val gyroAvailable = (System.currentTimeMillis() - lastGyroUpdateTime) < 500
+        val derivative = if (gyroAvailable) {
+            -currentRate * (AUTOPILOT_DELAY / 1000f)
+        } else {
+            headingDerivative
+        }
+        
+        val rawOutput = (error * apKp) + (autopilotIntegral * apKi) + (derivative * apKd)
+        
+        // Rate limiting: prevent increasing steering if already turning faster than limit
+        var output = rawOutput
+        if (gyroAvailable && abs(currentRate) > maxTurnRate) {
+            if (currentRate > maxTurnRate && rawOutput > steerValue.value) {
+                output = steerValue.value.toFloat()
+            } else if (currentRate < -maxTurnRate && rawOutput < steerValue.value) {
+                output = steerValue.value.toFloat()
+            }
+        }
         
         if (useRudderSensor) {
             val targetRudderPos = output.coerceIn(-100f, 100f)

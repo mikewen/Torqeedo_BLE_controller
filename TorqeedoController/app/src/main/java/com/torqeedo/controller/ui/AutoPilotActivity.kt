@@ -125,6 +125,29 @@ class AutoPilotActivity : AppCompatActivity() {
                 vm.setApKd(value)
             }
         }
+
+        // Max Turn Rate Tuning
+        binding.sbMaxRate.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) vm.setApMaxRate(progress.toFloat())
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+        binding.etMaxRate.setOnEditorActionListener { v, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                val value = v.text.toString().toFloatOrNull() ?: 0f
+                vm.setApMaxRate(value.coerceIn(0f, 100f))
+                v.clearFocus()
+                true
+            } else false
+        }
+        binding.etMaxRate.doAfterTextChanged { s ->
+            if (binding.etMaxRate.hasFocus()) {
+                val value = s.toString().toFloatOrNull() ?: 0f
+                vm.setApMaxRate(value)
+            }
+        }
     }
 
     private fun observeState() {
@@ -220,6 +243,13 @@ class AutoPilotActivity : AppCompatActivity() {
                     vm.apKd.collectLatest { kd ->
                         if (!binding.etKd.hasFocus()) binding.etKd.setText("%.1f".format(kd))
                         binding.sbKd.progress = (kd * 10).toInt()
+                    }
+                }
+
+                launch {
+                    vm.apMaxRate.collectLatest { rate ->
+                        if (!binding.etMaxRate.hasFocus()) binding.etMaxRate.setText("%.0f".format(rate))
+                        binding.sbMaxRate.progress = rate.toInt()
                     }
                 }
 

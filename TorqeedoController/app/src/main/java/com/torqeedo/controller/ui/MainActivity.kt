@@ -264,7 +264,7 @@ class MainActivity : AppCompatActivity() {
                     combine(vm.motorConnectionState, vm.imuConnectionState) { motor, imu ->
                         motor == TorqeedoBleManager.ConnectionState.CONNECTED || imu == TorqeedoBleManager.ConnectionState.CONNECTED
                     }.collectLatest { connected ->
-                        binding.witMotionCard.visibility = if (connected) View.VISIBLE else View.GONE
+                        binding.IMUCard.visibility = if (connected) View.VISIBLE else View.GONE
                     }
                 }
 

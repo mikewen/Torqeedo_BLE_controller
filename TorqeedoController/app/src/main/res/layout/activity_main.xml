@@ -473,9 +473,8 @@
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
-            <!-- WitMotion IMU Card -->
             <androidx.cardview.widget.CardView
-                android:id="@+id/witMotionCard"
+                android:id="@+id/IMUCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="8dp"
@@ -492,7 +491,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="HEADING / ATTITUDE (WITMOTION)"
+                        android:text="HEADING / ATTITUDE"
                         android:textColor="@color/text_secondary"
                         android:textSize="10sp"
                         android:letterSpacing="0.1"
