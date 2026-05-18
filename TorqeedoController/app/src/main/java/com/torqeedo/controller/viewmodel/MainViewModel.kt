@@ -195,11 +195,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _IMUYaw = MutableStateFlow(0f)
     val IMUYaw: StateFlow<Float> = _IMUYaw.asStateFlow()
 
-    val seaState: StateFlow<SeaState> = combine(IMURoll, IMUPitch) { roll, pitch ->
-        val maxDev = max(abs(roll), abs(pitch))
+    // --- Sensor Fusion ---
+    private val sensorFusion = SensorFusion()
+    private val _fusedState = MutableStateFlow(SensorFusion.FusedState())
+    val fusedState: StateFlow<SensorFusion.FusedState> = _fusedState.asStateFlow()
+
+    val seaState: StateFlow<SeaState> = fusedState.map { state ->
         when {
-            maxDev < 3.0f -> SeaState.CALM
-            maxDev < 8.0f -> SeaState.MODERATE
+            state.seaState < 0.2f -> SeaState.CALM
+            state.seaState < 0.6f -> SeaState.MODERATE
             else -> SeaState.ROUGH
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SeaState.CALM)
@@ -302,11 +306,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val scanAllNames: StateFlow<Boolean> = _scanAllNames.asStateFlow()
     private val _imuCalibStatus = MutableStateFlow("Idle")
     val imuCalibStatus: StateFlow<String> = _imuCalibStatus.asStateFlow()
-
-    // --- Sensor Fusion ---
-    private val sensorFusion = SensorFusion()
-    private val _fusedState = MutableStateFlow(SensorFusion.FusedState())
-    val fusedState: StateFlow<SensorFusion.FusedState> = _fusedState.asStateFlow()
 
     private val _rawImuData = MutableStateFlow(RawImuData())
     val rawImuData: StateFlow<RawImuData> = _rawImuData.asStateFlow()
@@ -752,7 +751,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _sfGyroCalStatus.value = "Starting..."
         speak("Gyro calibration started. Keep the boat steady.")
     }
-    
+
     fun stopSFusionGyroCal() {
         if (sensorFusion.finishGyroBiasCal()) {
             _isSFusionGyroCalibrating.value = false

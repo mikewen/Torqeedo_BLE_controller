@@ -125,6 +125,18 @@ class CalibrationActivity : AppCompatActivity() {
                     }
                 }
 
+                // 0xA3 GPS Data
+                launch {
+                    vm.parsedBleGps.collectLatest { parsed ->
+                        binding.tvParsedGps.text = parsed
+                    }
+                }
+                launch {
+                    vm.rawBleGpsFrame.collectLatest { frame ->
+                        binding.tvRawGps.text = frame?.joinToString(" ") { "%02X".format(it) } ?: "--"
+                    }
+                }
+
                 // Rudder/Ellipse Data
                 launch {
                     vm.magX.collectLatest { x -> binding.tvMagX.text = "X: $x" }

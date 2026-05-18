@@ -394,55 +394,95 @@ object BleRepository : TextToSpeech.OnInitListener {
     }
 
     private fun updateAutoPilot() {
+        var apKrate = 1.2f
+        val maxStepPerUpdate = 4f
+
         if (!autoPilotActive.value) return
-        
+
         val current = trueHeading.value
         val target = targetHeading.value
-        val currentRate = gyroZDegS.value
-        
+        val yawRate = gyroZDegS.value
+
         var error = target - current
+
         while (error > 180f) error -= 360f
         while (error < -180f) error += 360f
-        
-        // Apply deadband
-        if (abs(error) < apDeadband) {
-            error = 0f
-        }
 
-        autopilotIntegral = (autopilotIntegral + error).coerceIn(-AUTOPILOT_MAX_I, AUTOPILOT_MAX_I)
-        
-        val headingDerivative = error - autopilotLastError
-        autopilotLastError = error
-        
-        // Use gyro for D term if fresh (within 500ms), otherwise fallback to heading derivative
-        // Note: gyro rate is degrees/s, headingDerivative is degrees per AUTOPILOT_DELAY (200ms)
-        // We scale gyro to match the 'degrees-per-step' unit of the traditional derivative
-        val gyroAvailable = (System.currentTimeMillis() - lastGyroUpdateTime) < 500
-        val derivative = if (gyroAvailable) {
-            -currentRate * (AUTOPILOT_DELAY / 1000f)
-        } else {
-            headingDerivative
-        }
-        
-        val rawOutput = (error * apKp) + (autopilotIntegral * apKi) + (derivative * apKd)
-        
-        // Rate limiting: prevent increasing steering if already turning faster than limit
-        var output = rawOutput
-        if (gyroAvailable && abs(currentRate) > maxTurnRate) {
-            if (currentRate > maxTurnRate && rawOutput > steerValue.value) {
-                output = steerValue.value.toFloat()
-            } else if (currentRate < -maxTurnRate && rawOutput < steerValue.value) {
-                output = steerValue.value.toFloat()
+        //--------------------------------------------------
+        // SOFT DEADBAND
+        //--------------------------------------------------
+
+        val effectiveError = when {
+            abs(error) < apDeadband -> {
+                error * 0.2f
+            }
+            else -> {
+                sign(error) * (abs(error) - apDeadband)
             }
         }
-        
+
+        //--------------------------------------------------
+        // INTEGRAL MANAGEMENT
+        //--------------------------------------------------
+
+        if (abs(error) > apDeadband) {
+            autopilotIntegral += effectiveError * apKi
+            autopilotIntegral =
+                autopilotIntegral.coerceIn(-AUTOPILOT_MAX_I,AUTOPILOT_MAX_I)
+        } else {
+            // Slowly decay integral
+            autopilotIntegral *= 0.98f
+        }
+
+        //--------------------------------------------------
+        // GYRO YAW DAMPING
+        //--------------------------------------------------
+
+        val gyroAvailable =
+            (System.currentTimeMillis() - lastGyroUpdateTime) < 500
+
+        val yawDamping =
+            if (gyroAvailable)
+                yawRate * apKrate
+            else
+                0f
+
+        //--------------------------------------------------
+        // MAIN CONTROL LAW
+        //--------------------------------------------------
+
+        val rawOutput = (effectiveError * apKp) + autopilotIntegral - yawDamping
+
+        //--------------------------------------------------
+        // OUTPUT LIMIT
+        //--------------------------------------------------
+        val targetOutput = rawOutput.coerceIn(-100f, 100f)
+
+        //--------------------------------------------------
+        // STEERING SLEW RATE LIMITER
+        //--------------------------------------------------
+        val currentOutput = steerValue.value.toFloat()
+
+        val delta = (targetOutput - currentOutput).coerceIn(-maxStepPerUpdate,maxStepPerUpdate)
+
+        val output = currentOutput + delta
+
+        //--------------------------------------------------
+        // APPLY OUTPUT
+        //--------------------------------------------------
         if (useRudderSensor) {
-            val targetRudderPos = output.coerceIn(-100f, 100f)
+
             val currentRudderPos = rudderPosition.value
-            val rudderError = targetRudderPos - currentRudderPos
-            
-            if (abs(rudderError) > 2.0f) {
-                val step = if (rudderError > 0) 1 else -1
+            val rudderError = output - currentRudderPos
+
+            if (abs(rudderError) > 1.5f) {
+
+                val step =
+                    when {
+                        rudderError > 0 -> 1
+                        else -> -1
+                    }
+
                 adjustSteer(step)
             }
         } else {
