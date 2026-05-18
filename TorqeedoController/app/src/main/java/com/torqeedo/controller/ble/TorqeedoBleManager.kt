@@ -138,8 +138,8 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
     private val _qmc6308Data = MutableSharedFlow<TorqeedoProtocol.QMC6308Data>(replay = 1)
     val qmc6308Data: SharedFlow<TorqeedoProtocol.QMC6308Data> = _qmc6308Data.asSharedFlow()
 
-    private val _witMotionData = MutableSharedFlow<ByteArray>(replay = 1)
-    val witMotionData: SharedFlow<ByteArray> = _witMotionData.asSharedFlow()
+    private val _IMUData = MutableSharedFlow<ByteArray>(replay = 1)
+    val IMUData: SharedFlow<ByteArray> = _IMUData.asSharedFlow()
 
     private val _bleGpsData = MutableSharedFlow<ByteArray>(replay = 1)
     val bleGpsData: SharedFlow<ByteArray> = _bleGpsData.asSharedFlow()

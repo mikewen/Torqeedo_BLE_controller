@@ -272,6 +272,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _gpsCourse = MutableStateFlow<Int?>(null)
     val gpsCourse: StateFlow<Int?> = _gpsCourse.asStateFlow()
 
+    private val _rawBleGpsFrame = MutableStateFlow<ByteArray?>(null)
+    val rawBleGpsFrame: StateFlow<ByteArray?> = _rawBleGpsFrame.asStateFlow()
+
+    private val _parsedBleGps = MutableStateFlow<String>("No Data")
+    val parsedBleGps: StateFlow<String> = _parsedBleGps.asStateFlow()
+
     val currentLocation: StateFlow<GeoPoint?> = BleRepository.currentLocation
     val waypoints: StateFlow<List<Waypoint>> = BleRepository.waypoints
     val targetLocation: StateFlow<GeoPoint?> = BleRepository.targetLocation
@@ -328,7 +334,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         setupMagnetometer()
         setupQmc6308()
         setupSteerSensor()
-        setupWitMotion()
+        setupIMU()
         setupBleGps()
         setupAutoCalibration()
         setupSensorFusion()
@@ -396,9 +402,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun setupWitMotion() {
+    private fun setupIMU() {
         viewModelScope.launch {
-            imuManager.witMotionData.collect { frame ->
+            imuManager.IMUData.collect { frame ->
                 if (frame.size < 2) return@collect
                 val type = frame[1].toInt() and 0xFF
                 when (type) {
@@ -421,13 +427,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Convert NMEA coordinate format (DDMM.MMMM) to decimal degrees.
+     * Input is the NMEA value already divided by 10000 (i.e. rawLat = DDMM.MMMM as float).
+     */
+    private fun convertNmeaToDecimal(nmea: Float): Double {
+        val degrees = (nmea / 100).toInt()
+        val minutes = nmea - degrees * 100f
+        return degrees + minutes / 60.0
+    }
+
     private fun setupBleGps() {
         val process: (ByteArray) -> Unit = { frame ->
+            _rawBleGpsFrame.value = frame
+            //Log.d(TAG, "RECV A3 GPS: ${frame.joinToString(" ") { "%02X".format(it) }}")
             if (frame.size >= 17) {
                 lastBleGpsUpdate = System.currentTimeMillis()
-                val lat = readS32LE(frame, 5) / 1_000_000.0; val lon = readS32LE(frame, 9) / 1_000_000.0
+                //val lat = readS32LE(frame, 5) / 1_000_000.0; val lon = readS32LE(frame, 9) / 1_000_000.0
+                //val rawLat = readS32LE(frame, 5) / 1_000_000.0; val rawLon = readS32LE(frame, 9) / 1_000_000.0
+                val rawLat = readS32LE(frame, 5) / 10000.0f; val rawLon = readS32LE(frame, 9) / 10000.0f
+                val lat      = convertNmeaToDecimal(rawLat)
+                val lon      = convertNmeaToDecimal(rawLon)
                 val speed = readU16LE(frame, 13) / 100.0f; val course = (readU16LE(frame, 15) / 100.0f).toInt()
                 _gpsFix.value = true; _gpsSpeedKnots.value = speed; _gpsCourse.value = course
+                _parsedBleGps.value = "Lat: %.6f, Lon: %.6f, Spd: %.1f, Cog: %d".format(lat, lon, speed, course)
+                //Log.d(TAG, "RECV A3 GPS: Lat: %.6f, Lon: %.6f, Spd: %.1f, Cog: %d".format(lat, lon, speed, course))
+                //_tvParsedGps.value = "Lat: %.6f, Lon: %.6f, Spd: %.1f, Cog: %d".format(lat, lon, speed, course)
                 BleRepository.setCurrentLocation(GeoPoint(lat, lon))
                 motorManager.updateGpsInfo(lat, lon, speed, course); gpsManager.updateGpsInfo(lat, lon, speed, course)
                 val decl = GeomagneticField(lat.toFloat(), lon.toFloat(), 0f, System.currentTimeMillis()).declination
@@ -439,6 +464,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 
                 // Also feed SensorFusion A3
                 sensorFusion.processA3(lat, lon, speed, course.toFloat(), true, System.currentTimeMillis())
+            } else {
+                Log.w(TAG, "A3 GPS frame too short: ${frame.size}")
+                _parsedBleGps.value = "Frame too short: ${frame.size}"
             }
         }
         viewModelScope.launch { motorManager.bleGpsData.collect { process(it) } }
@@ -605,9 +633,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(res: LocationResult) {
-            if (System.currentTimeMillis() - lastBleGpsUpdate < 2000) return
+            // Prefer BLE GPS (0xA3) if it was updated in the last 10 seconds
+            if (System.currentTimeMillis() - lastBleGpsUpdate < 10000) return
+            
             val loc = res.lastLocation ?: return
-            _gpsFix.value = true; _gpsSpeedKnots.value = loc.speed * 1.94384f
+            _gpsFix.value = true
+            _gpsSpeedKnots.value = loc.speed * 1.94384f
             _gpsCourse.value = if (loc.hasBearing()) loc.bearing.toInt() else null
             BleRepository.setCurrentLocation(GeoPoint(loc.latitude, loc.longitude))
             motorManager.updateGpsInfo(loc.latitude, loc.longitude, _gpsSpeedKnots.value.toFloat(), _gpsCourse.value)
@@ -631,7 +662,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 when {
                     disc.name.contains("LOOKBON", true) -> remote.connectToDevice(disc.device)
-                    disc.name.contains("WitMotion", true) -> imuManager.connectToDevice(disc.device)
                     disc.name.contains("GPS", true) -> gpsManager.connectToDevice(disc.device)
                     else -> motorManager.connectToDevice(disc.device)
                 }
