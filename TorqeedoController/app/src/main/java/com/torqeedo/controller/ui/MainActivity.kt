@@ -259,10 +259,11 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                // IMU-dependent Card Visibility
+                // IMU/Heading Card Visibility
                 launch {
-                    vm.imuConnectionState.collectLatest { state ->
-                        val connected = state == TorqeedoBleManager.ConnectionState.CONNECTED
+                    combine(vm.motorConnectionState, vm.imuConnectionState) { motor, imu ->
+                        motor == TorqeedoBleManager.ConnectionState.CONNECTED || imu == TorqeedoBleManager.ConnectionState.CONNECTED
+                    }.collectLatest { connected ->
                         binding.witMotionCard.visibility = if (connected) View.VISIBLE else View.GONE
                     }
                 }
@@ -436,6 +437,13 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     vm.trueHeading.collectLatest { heading ->
                         binding.tvTrueHeading.text = "%.1f°".format(heading)
+                    }
+                }
+
+                launch {
+                    vm.fusedState.collectLatest { state ->
+                        binding.tvFusedHeading.text = "%.1f°".format(state.headingDeg)
+                        binding.tvMagHeading.text   = "%.1f°".format(state.magHeadingDeg)
                     }
                 }
 

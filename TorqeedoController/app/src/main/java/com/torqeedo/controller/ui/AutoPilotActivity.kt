@@ -137,6 +137,18 @@ class AutoPilotActivity : AppCompatActivity() {
                 }
 
                 launch {
+                    vm.fusedState.collectLatest { state ->
+                        binding.tvMagHeading.text = "%.1f°".format(state.magHeadingDeg)
+                    }
+                }
+
+                launch {
+                    vm.gpsCourse.collectLatest { course ->
+                        binding.tvGpsCourse.text = course?.let { "$it.0°" } ?: "—"
+                    }
+                }
+
+                launch {
                     vm.targetHeading.collectLatest { target ->
                         binding.tvTargetHeading.text = "%.1f°".format(target)
                     }

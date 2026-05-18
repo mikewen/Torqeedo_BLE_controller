@@ -79,11 +79,65 @@
                         android:textSize="48sp"
                         android:fontFamily="sans-serif-medium" />
 
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center"
+                        android:layout_marginTop="8dp">
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical"
+                            android:gravity="center">
+                            <TextView
+                                android:id="@+id/tvMagHeading"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="000.0°"
+                                android:textColor="@color/text_primary"
+                                android:textSize="48sp"
+                                android:fontFamily="sans-serif-medium" />
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="MAG"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <View android:layout_width="1dp" android:layout_height="match_parent"
+                            android:background="@color/border_subtle" android:layout_marginHorizontal="8dp"/>
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical"
+                            android:gravity="center">
+                            <TextView
+                                android:id="@+id/tvGpsCourse"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="000.0°"
+                                android:textColor="@color/text_primary"
+                                android:textSize="48sp"
+                                android:fontFamily="sans-serif-medium" />
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="COG"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+
                     <View
                         android:layout_width="match_parent"
                         android:layout_height="1dp"
                         android:background="@color/border_subtle"
-                        android:layout_marginVertical="16dp" />
+                        android:layout_marginVertical="12dp" />
 
                     <TextView
                         android:layout_width="wrap_content"
@@ -106,24 +160,30 @@
                         android:layout_width="match_parent"
                         android:layout_height="1dp"
                         android:background="@color/border_subtle"
-                        android:layout_marginVertical="16dp" />
+                        android:layout_marginVertical="12dp" />
 
-                    <TextView
-                        android:layout_width="wrap_content"
+                    <LinearLayout
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="SEA STATE"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="12sp"
-                        android:letterSpacing="0.1" />
+                        android:orientation="horizontal"
+                        android:gravity="center">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="SEA STATE: "
+                            android:textColor="@color/text_secondary"
+                            android:textSize="11sp"
+                            android:letterSpacing="0.1" />
 
-                    <TextView
-                        android:id="@+id/tvSeaState"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="CALM"
-                        android:textColor="@color/status_connected"
-                        android:textSize="24sp"
-                        android:fontFamily="sans-serif-medium" />
+                        <TextView
+                            android:id="@+id/tvSeaState"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="CALM"
+                            android:textColor="@color/status_connected"
+                            android:textSize="11sp"
+                            android:fontFamily="sans-serif-medium" />
+                    </LinearLayout>
 
                     <TextView
                         android:id="@+id/tvPitchRoll"
@@ -131,7 +191,7 @@
                         android:layout_height="wrap_content"
                         android:text="P: 0.0° R: 0.0°"
                         android:textColor="@color/text_secondary"
-                        android:textSize="14sp"
+                        android:textSize="11sp"
                         android:layout_marginTop="4dp" />
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
@@ -157,8 +217,7 @@
                         android:text="NAVIGATION"
                         android:textColor="@color/text_secondary"
                         android:textSize="10sp"
-                        android:letterSpacing="0.1"
-                        android:layout_marginBottom="8dp"/>
+                        android:letterSpacing="0.1" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnOpenMap"
