@@ -71,8 +71,6 @@ class BleScanner(private val adapter: BluetoothAdapter) {
                 ScanFilter.Builder().setDeviceName("AC6328_GPS").build(),
                 ScanFilter.Builder().setDeviceName("Steer_UART").build(),
                 ScanFilter.Builder().setDeviceName("GPS_Steer").build(),
-                ScanFilter.Builder().setDeviceName("LOOKBON").build(),
-                ScanFilter.Builder().setDeviceName("IMU_GPS").build(),
                 ScanFilter.Builder().setDeviceName("BLE_GPS").build()
             )
         }

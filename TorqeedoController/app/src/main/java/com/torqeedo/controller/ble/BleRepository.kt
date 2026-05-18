@@ -53,6 +53,8 @@ object BleRepository : TextToSpeech.OnInitListener {
         if (dir == Direction.FORWARD) mag else -mag
     }.stateIn(scope, SharingStarted.Eagerly, 0)
 
+    val remoteConnected = MutableStateFlow(false)
+
     // --- Shared Sensor Data (Synced from Managers/ViewModels) ---
     val trueHeading = MutableStateFlow(0f)
     val gyroZDegS = MutableStateFlow(0f)
@@ -64,7 +66,7 @@ object BleRepository : TextToSpeech.OnInitListener {
     var speedStep = 20
     var autoIncrementDelay = 200L
     var throttleDelay = 200L
-    var steerScale = 10
+    var steerScale = 200
     var apKp = 2.5f
     var apKi = 0.1f
     var apKd = 1.0f
@@ -137,7 +139,7 @@ object BleRepository : TextToSpeech.OnInitListener {
 
     fun getMotorManager(context: Context): TorqeedoBleManager {
         initTts(context)
-        return motorManager ?: TorqeedoBleManager(context.applicationContext).also { 
+        return motorManager ?: TorqeedoBleManager(context.applicationContext).also {
             motorManager = it
             observeMotorConnection(it)
         }
@@ -545,7 +547,35 @@ object BleRepository : TextToSpeech.OnInitListener {
                     startSteerRepeat(1)
                 }
                 LookbonRemote.Command.STOP_STEER -> stopSteerRepeat()
+                
+                LookbonRemote.Command.DOUBLE_STEER_LEFT -> {
+                    speak("Hard left")
+                    // If a single click already happened (1), we add 4 more to make it 5.
+                    // But if it was a "pure" double click from joystick, we might want 5.
+                    // For simplicity, let's just do 5 and ignore the single click overlap for now.
+                    adjustSteer(-5)
+                }
+                LookbonRemote.Command.DOUBLE_STEER_RIGHT -> {
+                    speak("Hard right")
+                    adjustSteer(5)
+                }
+                LookbonRemote.Command.DOUBLE_SPEED_UP -> {
+                    repeat(5) { increaseSpeed() } // 5 * 20 = 100 (10%)
+                    speakThrottle()
+                }
+                LookbonRemote.Command.DOUBLE_SPEED_DOWN -> {
+                    repeat(5) { decreaseSpeed() } // 5 * 20 = 100 (10%)
+                    speakThrottle()
+                }
             }
+        }
+        remote?.onConnected = {
+            remoteConnected.value = true
+            speak("Remote connected")
+        }
+        remote?.onDisconnected = {
+            remoteConnected.value = false
+            speak("Remote disconnected")
         }
     }
 

@@ -105,7 +105,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // --- Global State Proxies ---
     val direction: StateFlow<Direction> = BleRepository.direction
     val speedMagnitude: StateFlow<Int> = BleRepository.speedMagnitude
-    val currentSpeed: StateFlow<Int> = BleRepository.currentSpeed
+    //val currentSpeed: StateFlow<Int> = BleRepository.currentSpeed
     val steerValue: StateFlow<Int> = BleRepository.steerValue
     val autoPilotActive: StateFlow<Boolean> = BleRepository.autoPilotActive
     val targetHeading: StateFlow<Float> = BleRepository.targetHeading
@@ -123,7 +123,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _showMotorStatus = MutableStateFlow(prefs.getBoolean(KEY_SHOW_MOTOR_STATUS, false))
     val showMotorStatus: StateFlow<Boolean> = _showMotorStatus.asStateFlow()
 
-    private val _steerScale = MutableStateFlow(prefs.getInt(KEY_STEER_SCALE, 10))
+    private val _steerScale = MutableStateFlow(prefs.getInt(KEY_STEER_SCALE, 200))
     val steerScale: StateFlow<Int> = _steerScale.asStateFlow()
 
     private val _qmcLpfEnabled = MutableStateFlow(prefs.getBoolean(KEY_QMC_LPF, false))
@@ -142,8 +142,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val imuConnectionState:   StateFlow<TorqeedoBleManager.ConnectionState> = imuManager.connectionState
     val gpsConnectionState:   StateFlow<TorqeedoBleManager.ConnectionState> = gpsManager.connectionState
 
-    private val _remoteConnected = MutableStateFlow(false)
-    val remoteConnected: StateFlow<Boolean> = _remoteConnected.asStateFlow()
+    val remoteConnected: StateFlow<Boolean> = BleRepository.remoteConnected.asStateFlow()
 
     val scanResults: StateFlow<List<DiscoveredDevice>> = scanner.devices
     val isScanning:  StateFlow<Boolean> = scanner.isScanning
@@ -155,7 +154,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val estimatedPowerW: StateFlow<Float> = sensorCurrent.map { it * 47.0f }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
 
-    val rawStatus: StateFlow<ByteArray?> = 
+    val rawStatus: StateFlow<ByteArray?> =
         motorManager.rawStatusFlow.stateIn(viewModelScope, SharingStarted.Lazily, null)
 
     // --- Sensors (Calculated locally, synced to Repository) ---
@@ -356,6 +355,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         BleRepository.apDeadband = _apDeadband.value
         BleRepository.maxTurnRate = _apMaxRate.value
         BleRepository.useRudderSensor = _useRudderSensor.value
+        BleRepository.steerScale = _steerScale.value
+        BleRepository.enableVoicePrompts = _enableVoicePrompts.value
+        BleRepository.showMotorStatus = _showMotorStatus.value
         
         viewModelScope.launch { trueHeading.collect { BleRepository.trueHeading.value = it } }
         viewModelScope.launch { rudderPosition.collect { BleRepository.rudderPosition.value = it } }
@@ -455,12 +457,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 BleRepository.setCurrentLocation(GeoPoint(lat, lon))
                 motorManager.updateGpsInfo(lat, lon, speed, course); gpsManager.updateGpsInfo(lat, lon, speed, course)
                 val decl = GeomagneticField(lat.toFloat(), lon.toFloat(), 0f, System.currentTimeMillis()).declination
-                if (abs(_declination.value - decl) > 0.1f) { 
+                if (abs(_declination.value - decl) > 0.1f) {
                     _declination.value = decl
                     prefs.edit().putFloat(KEY_DECLINATION, decl).apply()
                     sensorFusion.setDeclination(decl)
                 }
-                
+
                 // Also feed SensorFusion A3
                 sensorFusion.processA3(lat, lon, speed, course.toFloat(), true, System.currentTimeMillis())
             } else {
@@ -468,7 +470,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _parsedBleGps.value = "Frame too short: ${frame.size}"
             }
         }
-        viewModelScope.launch { motorManager.bleGpsData.collect { process(it) } }
+        //viewModelScope.launch { motorManager.bleGpsData.collect { process(it) } }
         viewModelScope.launch { gpsManager.bleGpsData.collect { process(it) } }
     }
 
@@ -532,7 +534,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 // Apply SensorFusion processing
                 sensorFusion.processA1(ax, ay, az, gx, gy, gz, mx, my, mz, now, accelRotated180 = false)
-                
+
                 // Continuous integration for verification in UI
                 _calibDegreesTurned.value += sensorFusion.getState().gyroZDegS * dt
             }
@@ -553,10 +555,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch { imuManager.imuA1Data.collect { processA1(it) } }
-        viewModelScope.launch { motorManager.imuA1Data.collect { processA1(it) } }
+        //viewModelScope.launch { motorManager.imuA1Data.collect { processA1(it) } }
         viewModelScope.launch { gpsManager.imuA1Data.collect { processA1(it) } }
         viewModelScope.launch { imuManager.gnssA2Data.collect { processA2(it) } }
-        viewModelScope.launch { motorManager.gnssA2Data.collect { processA2(it) } }
+        //viewModelScope.launch { motorManager.gnssA2Data.collect { processA2(it) } }
         viewModelScope.launch { gpsManager.gnssA2Data.collect { processA2(it) } }
     }
 
@@ -656,12 +658,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopScan() = scanner.stopScan(); fun setScanAllNames(all: Boolean) { _scanAllNames.value = all }
 
 
+// In MainViewModel.kt
+
     fun connect(disc: DiscoveredDevice) {
         viewModelScope.launch {
             try {
                 when {
                     disc.name.contains("LOOKBON", true) -> remote.connectToDevice(disc.device)
-                    disc.name.contains("GPS", true) -> gpsManager.connectToDevice(disc.device)
+                    // More specific matching for motor/steering control
+                    disc.name.contains("UART", true) || disc.name.contains("Steer", true) -> motorManager.connectToDevice(disc.device)
+                    disc.name.contains("GPS", true) || disc.name.contains("IMU", true) -> {
+                        // Decide if it should be gpsManager or imuManager
+                        if (disc.name.contains("GPS", true)) gpsManager.connectToDevice(disc.device)
+                        else imuManager.connectToDevice(disc.device)
+                    }
                     else -> motorManager.connectToDevice(disc.device)
                 }
                 stopScan()

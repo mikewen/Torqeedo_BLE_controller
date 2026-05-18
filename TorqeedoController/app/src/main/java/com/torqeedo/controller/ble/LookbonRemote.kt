@@ -33,11 +33,16 @@ class LookbonRemote(context: Context) : BleManager(context) {
         STEER_RIGHT,
         START_STEER_LEFT,
         START_STEER_RIGHT,
-        STOP_STEER
+        STOP_STEER,
+        DOUBLE_STEER_LEFT,
+        DOUBLE_STEER_RIGHT,
+        DOUBLE_SPEED_UP,
+        DOUBLE_SPEED_DOWN
     }
 
     companion object {
         private const val TAG = "LookbonRemote"
+        private const val DOUBLE_CLICK_THRESHOLD = 400L
 
         // ae30 service / ae02 characteristic
         val SERVICE_UUID: UUID = UUID.fromString("0000ae30-0000-1000-8000-00805f9b34fb")
@@ -57,6 +62,9 @@ class LookbonRemote(context: Context) : BleManager(context) {
     private var lastJoystickDir = 0
     private val mainHandler = Handler(Looper.getMainLooper())
     private var notifyChar: BluetoothGattCharacteristic? = null
+
+    private val lastClickTimes = mutableMapOf<Int, Long>()
+    private val lastJoystickTimes = mutableMapOf<Int, Long>()
 
     override fun getGattCallback(): BleManagerGattCallback = GattCb()
 
@@ -148,15 +156,36 @@ class LookbonRemote(context: Context) : BleManager(context) {
             }
 
             // Fallback for single clicks (A event)
-            event == 'A' && btn == 2 -> emit(Command.STEER_RIGHT)
-            event == 'A' && btn == 3 -> emit(Command.STEER_LEFT)
-            event == 'A' && btn == 4 -> if (rHeld) emit(Command.SPEED_UP_FAST) else emit(Command.SPEED_UP)
-            event == 'A' && btn == 5 -> if (rHeld) emit(Command.SPEED_DOWN_FAST) else emit(Command.SPEED_DOWN)
+            event == 'A' && btn in 2..5 -> {
+                val now = System.currentTimeMillis()
+                val last = lastClickTimes[btn] ?: 0L
+                lastClickTimes[btn] = now
+                
+                if (now - last < DOUBLE_CLICK_THRESHOLD) {
+                    // Double click
+                    when (btn) {
+                        2 -> emit(Command.DOUBLE_STEER_RIGHT)
+                        3 -> emit(Command.DOUBLE_STEER_LEFT)
+                        4 -> emit(Command.DOUBLE_SPEED_UP)
+                        5 -> emit(Command.DOUBLE_SPEED_DOWN)
+                    }
+                } else {
+                    // Single click
+                    when (btn) {
+                        2 -> emit(Command.STEER_RIGHT)
+                        3 -> emit(Command.STEER_LEFT)
+                        4 -> if (rHeld) emit(Command.SPEED_UP_FAST) else emit(Command.SPEED_UP)
+                        5 -> if (rHeld) emit(Command.SPEED_DOWN_FAST) else emit(Command.SPEED_DOWN)
+                    }
+                }
+            }
         }
     }
 
     private fun handleJoystick(dir: Int) {
         if (dir == lastJoystickDir) return
+
+        val now = System.currentTimeMillis()
         
         // Stop any current repeat or steering when joystick moves or centers
         if (lastJoystickDir != 0) {
@@ -164,11 +193,27 @@ class LookbonRemote(context: Context) : BleManager(context) {
             emit(Command.STOP_STEER)
         }
 
-        when (dir) {
-            1 -> emit(Command.START_REPEAT_UP)
-            2 -> emit(Command.START_REPEAT_DOWN)
-            3 -> emit(Command.START_STEER_LEFT)
-            4 -> emit(Command.START_STEER_RIGHT)
+        if (dir != 0) {
+            val last = lastJoystickTimes[dir] ?: 0L
+            lastJoystickTimes[dir] = now
+            
+            if (now - last < DOUBLE_CLICK_THRESHOLD) {
+                // Double "click" (push) of joystick
+                when (dir) {
+                    1 -> emit(Command.DOUBLE_SPEED_UP)
+                    2 -> emit(Command.DOUBLE_SPEED_DOWN)
+                    3 -> emit(Command.DOUBLE_STEER_LEFT)
+                    4 -> emit(Command.DOUBLE_STEER_RIGHT)
+                }
+            } else {
+                // Normal movement
+                when (dir) {
+                    1 -> emit(Command.START_REPEAT_UP)
+                    2 -> emit(Command.START_REPEAT_DOWN)
+                    3 -> emit(Command.START_STEER_LEFT)
+                    4 -> emit(Command.START_STEER_RIGHT)
+                }
+            }
         }
         
         lastJoystickDir = dir
@@ -182,11 +227,11 @@ class LookbonRemote(context: Context) : BleManager(context) {
         setConnectionObserver(object : ConnectionObserver {
             override fun onDeviceConnecting(d: BluetoothDevice) = Unit
             override fun onDeviceDisconnecting(d: BluetoothDevice) = Unit
-            override fun onDeviceReady(d: BluetoothDevice) = Unit
-            override fun onDeviceConnected(d: BluetoothDevice) {
-                Log.i(TAG, "Lookbon remote connected")
+            override fun onDeviceReady(d: BluetoothDevice) {
+                Log.i(TAG, "Lookbon remote ready")
                 mainHandler.post { onConnected?.invoke() }
             }
+            override fun onDeviceConnected(d: BluetoothDevice) = Unit
             override fun onDeviceFailedToConnect(d: BluetoothDevice, reason: Int) {
                 Log.w(TAG, "Lookbon remote failed: $reason")
                 mainHandler.post { onDisconnected?.invoke() }
