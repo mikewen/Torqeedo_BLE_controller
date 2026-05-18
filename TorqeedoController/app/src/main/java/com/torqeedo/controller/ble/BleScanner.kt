@@ -72,7 +72,8 @@ class BleScanner(private val adapter: BluetoothAdapter) {
                 ScanFilter.Builder().setDeviceName("Steer_UART").build(),
                 ScanFilter.Builder().setDeviceName("GPS_Steer").build(),
                 ScanFilter.Builder().setDeviceName("LOOKBON").build(),
-                ScanFilter.Builder().setDeviceName("IMU_WitMotion").build()
+                ScanFilter.Builder().setDeviceName("IMU_GPS").build(),
+                ScanFilter.Builder().setDeviceName("BLE_GPS").build()
             )
         }
         
@@ -103,7 +104,8 @@ class BleScanner(private val adapter: BluetoothAdapter) {
             .build()
 
         val filters = listOf(
-            ScanFilter.Builder().setDeviceName("IMU_WitMotion").build()
+            ScanFilter.Builder().setDeviceName("IMU_GPS").build(),
+            ScanFilter.Builder().setDeviceName("BLE_GPS").build()
         )
         
         internalStartScan(filters, settings)
@@ -119,7 +121,9 @@ class BleScanner(private val adapter: BluetoothAdapter) {
 
         val filters = listOf(
             ScanFilter.Builder().setDeviceName("AC6328_GPS").build(),
-            ScanFilter.Builder().setDeviceName("GPS_Steer").build()
+            ScanFilter.Builder().setDeviceName("GPS_Steer").build(),
+            ScanFilter.Builder().setDeviceName("IMU_GPS").build(),
+            ScanFilter.Builder().setDeviceName("BLE_GPS").build()
         )
         
         internalStartScan(filters, settings)

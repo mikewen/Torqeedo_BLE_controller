@@ -26,6 +26,12 @@ import kotlin.math.*
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
+    data class RawImuData(
+        val ax: Short = 0, val ay: Short = 0, val az: Short = 0,
+        val gx: Short = 0, val gy: Short = 0, val gz: Short = 0,
+        val mx: Short = 0, val my: Short = 0, val mz: Short = 0
+    )
+
     companion object {
         private const val TAG = "MainViewModel"
         private const val PREFS_NAME = "torqeedo_prefs"
@@ -35,7 +41,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_SHOW_MOTOR_STATUS = "show_motor_status"
         private const val KEY_REMOTE_MAC = "remote_mac"
         private const val KEY_STEER_SCALE = "steer_scale"
-        
+
         private const val KEY_CALIB_ZERO = "calib_zero"
         private const val KEY_CALIB_PORT = "calib_port"
         private const val KEY_CALIB_STBD = "calib_stbd"
@@ -45,7 +51,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         private const val KEY_BIAS1 = "steer_bias1"
         private const val KEY_BIAS2 = "steer_bias2"
-        
+
         private const val KEY_MAG_ELLIPSE_CX = "mag_ellipse_cx"
         private const val KEY_MAG_ELLIPSE_CY = "mag_ellipse_cy"
         private const val KEY_MAG_ELLIPSE_A = "mag_ellipse_a"
@@ -76,11 +82,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_USE_RUDDER_SENSOR = "use_rudder_sensor"
         private const val KEY_QMC_LPF = "qmc_lpf"
 
+        private const val KEY_SF_MAG_BIAS_X = "sf_mag_bias_x"
+        private const val KEY_SF_MAG_BIAS_Y = "sf_mag_bias_y"
+        private const val KEY_SF_GYRO_BIAS_X = "sf_gyro_bias_x"
+        private const val KEY_SF_GYRO_BIAS_Y = "sf_gyro_bias_y"
+        private const val KEY_SF_GYRO_BIAS_Z = "sf_gyro_bias_z"
+
         private const val DEFAULT_AP_KP = 2.5f
         private const val DEFAULT_AP_KI = 0.1f
         private const val DEFAULT_AP_KD = 1.0f
 
         private const val KEY_WAYPOINTS = "waypoints_v3"
+        private const val KEY_SCAN_ALL = "scan_all_names"
     }
 
     private val prefs: SharedPreferences = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -130,10 +143,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val scanResults: StateFlow<List<DiscoveredDevice>> = scanner.devices
     val isScanning:  StateFlow<Boolean> = scanner.isScanning
-    
+
     val motorStatus: StateFlow<TorqeedoProtocol.MotorStatus?> =
         motorManager.statusFlow.stateIn(viewModelScope, SharingStarted.Lazily, null)
-    
+
     val sensorCurrent: StateFlow<Float> = motorManager.sensorCurrent
     val estimatedPowerW: StateFlow<Float> = sensorCurrent.map { it * 47.0f }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
@@ -199,6 +212,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         while (heading >= 360) heading -= 360f
         heading
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
+
 
     private val _calibZero = MutableStateFlow(prefs.getInt(KEY_CALIB_ZERO, 0))
     private val _calibPort = MutableStateFlow(prefs.getInt(KEY_CALIB_PORT, 0))
@@ -270,7 +284,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val useRudderSensor: StateFlow<Boolean> = _useRudderSensor.asStateFlow()
 
     private var lastBleGpsUpdate = 0L
-    private val _scanAllNames = MutableStateFlow(false)
+    private val _scanAllNames = MutableStateFlow(prefs.getBoolean(KEY_SCAN_ALL, false))
     val scanAllNames: StateFlow<Boolean> = _scanAllNames.asStateFlow()
     private val _imuCalibStatus = MutableStateFlow("Idle")
     val imuCalibStatus: StateFlow<String> = _imuCalibStatus.asStateFlow()
@@ -280,7 +294,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _fusedState = MutableStateFlow(SensorFusion.FusedState())
     val fusedState: StateFlow<SensorFusion.FusedState> = _fusedState.asStateFlow()
 
+    private val _rawImuData = MutableStateFlow(RawImuData())
+    val rawImuData: StateFlow<RawImuData> = _rawImuData.asStateFlow()
+
+    private val _calibDegreesTurned = MutableStateFlow(0f)
+    val calibDegreesTurned: StateFlow<Float> = _calibDegreesTurned.asStateFlow()
+
+    private val _isSFusionMagCalibrating = MutableStateFlow(false)
+    val isSFusionMagCalibrating = _isSFusionMagCalibrating.asStateFlow()
+
+    private val _isSFusionGyroCalibrating = MutableStateFlow(false)
+    val isSFusionGyroCalibrating = _isSFusionGyroCalibrating.asStateFlow()
+
+    private val _sfMagCalStatus = MutableStateFlow("Ready")
+    val sfMagCalStatus: StateFlow<String> = _sfMagCalStatus.asStateFlow()
+
+    private val _sfGyroCalStatus = MutableStateFlow("Ready")
+    val sfGyroCalStatus: StateFlow<String> = _sfGyroCalStatus.asStateFlow()
+
+    private var lastA1Time = 0L
+
     init {
+        loadSensorFusionOffsets()
         setupSync()
         setupMagnetometer()
         setupQmc6308()
@@ -289,82 +324,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         setupBleGps()
         setupAutoCalibration()
         setupSensorFusion()
+    }
 
-        // Sync Managers with Prefs
-        motorManager.setRawDataEnabled(_showRawData.value)
-        motorManager.setLoggingEnabled(_enableLogging.value)
-        imuManager.setRawDataEnabled(_showRawData.value)
-        imuManager.setLoggingEnabled(_enableLogging.value)
-        gpsManager.setRawDataEnabled(_showRawData.value)
-        gpsManager.setLoggingEnabled(_enableLogging.value)
-
-        // Steer LUT Init
-        steerProcessor.bias1 = prefs.getInt(KEY_BIAS1, SteerSensorProcessor.DEFAULT_BIAS)
-        steerProcessor.bias2 = prefs.getInt(KEY_BIAS2, SteerSensorProcessor.DEFAULT_BIAS)
-        loadSteerLutData()
-
-        if (BleRepository.waypoints.value.isEmpty()) {
-            BleRepository.setWaypoints(loadWaypoints())
-        }
-
-        // Auto-reconnect remote
-        if (!remote.isConnected) {
-            prefs.getString(KEY_REMOTE_MAC, null)?.let { mac ->
-                try {
-                    remote.connectToDevice(bluetoothAdapter.getRemoteDevice(mac), autoReconnect = true)
-                } catch (e: Exception) { Log.e(TAG, "Remote reconnect failed", e) }
-            }
-        } else {
-            _remoteConnected.value = true
-        }
+    private fun loadSensorFusionOffsets() {
+        sensorFusion.manualCalHardIronX = prefs.getFloat(KEY_SF_MAG_BIAS_X, 0f)
+        sensorFusion.manualCalHardIronY = prefs.getFloat(KEY_SF_MAG_BIAS_Y, 0f)
+        sensorFusion.gyroBiasX = prefs.getFloat(KEY_SF_GYRO_BIAS_X, 0f)
+        sensorFusion.gyroBiasY = prefs.getFloat(KEY_SF_GYRO_BIAS_Y, 0f)
+        sensorFusion.gyroBiasZ = prefs.getFloat(KEY_SF_GYRO_BIAS_Z, 0f)
     }
 
     private fun setupSync() {
-        // Feed local UI state into Singleton Repository
-        BleRepository.speedStep = 20
-        BleRepository.autoIncrementDelay = 200L
-        BleRepository.throttleDelay = 200L
-        BleRepository.steerScale = _steerScale.value
+        viewModelScope.launch { BleRepository.targetHeading.collect { sensorFusion.resetFilter() } }
+        // Feed initial values to Repository
         BleRepository.apKp = _apKp.value
         BleRepository.apKi = _apKi.value
         BleRepository.apKd = _apKd.value
         BleRepository.useRudderSensor = _useRudderSensor.value
-        BleRepository.showMotorStatus = _showMotorStatus.value
-        BleRepository.enableVoicePrompts = _enableVoicePrompts.value
-
-        // Feed Derived Sensor values back to Repository for PID loop
+        
         viewModelScope.launch { trueHeading.collect { BleRepository.trueHeading.value = it } }
         viewModelScope.launch { rudderPosition.collect { BleRepository.rudderPosition.value = it } }
-        viewModelScope.launch { sensorCurrent.collect { BleRepository.sensorCurrent.value = it } }
-
-        // Local remote connection handling
-        remote.onConnected = {
-            _remoteConnected.value = true
-            speak("Remote connected")
-            remote.bluetoothDevice?.address?.let { mac ->
-                prefs.edit().putString(KEY_REMOTE_MAC, mac).apply()
-            }
-        }
-        remote.onDisconnected = {
-            _remoteConnected.value = false
-            speak("Remote disconnected")
-        }
-    }
-
-    private fun speak(text: String) {
-        BleRepository.speak(text)
     }
 
     private fun setupMagnetometer() {
         viewModelScope.launch {
-            motorManager.magnetometerData.collect { bytes ->
-                if (bytes.size >= 9) {
-                    val xU = ((bytes[0].toInt() and 0xFF) shl 12) or ((bytes[1].toInt() and 0xFF) shl 4) or (bytes[6].toInt() and 0x0F)
-                    val yU = ((bytes[2].toInt() and 0xFF) shl 12) or ((bytes[3].toInt() and 0xFF) shl 4) or (bytes[7].toInt() and 0x0F)
-                    val zU = ((bytes[4].toInt() and 0xFF) shl 12) or ((bytes[5].toInt() and 0xFF) shl 4) or (bytes[8].toInt() and 0x0F)
-                    _magX.value = xU - 524288
-                    _magY.value = yU - 524288
-                    _magZ.value = zU - 524288
+            motorManager.magnetometerData.collect { data ->
+                if (data.size >= 6) {
+                    val x = readS16LE(data, 0); val y = readS16LE(data, 2); val z = readS16LE(data, 4)
+                    val xU = (x.toInt() and 0xFFFF); val yU = (y.toInt() and 0xFFFF); val zU = (z.toInt() and 0xFFFF)
+                    _magX.value = xU - 524288; _magY.value = yU - 524288; _magZ.value = zU - 524288
                     if (_isMagCalibrating.value) magCalibrator.addSample(_magX.value.toFloat(), _magY.value.toFloat())
                 }
             }
@@ -461,41 +449,70 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 BleRepository.setCurrentLocation(GeoPoint(state.latDeg, state.lonDeg))
                 _gpsSpeedKnots.value = state.speedKnots
             }
+
+            // Update calibration status strings
+            if (sensorFusion.isManualCalActive) {
+                _sfMagCalStatus.value = "Recording: ${sensorFusion.manualMagCalSampleCount} samples (${sensorFusion.manualMagCalProgress}%)"
+            }
+            if (sensorFusion.isGyroBiasCalActive) {
+                _sfGyroCalStatus.value = "Recording: ${sensorFusion.gyroBiasCalSampleCount} samples (${sensorFusion.gyroBiasCalProgress}%)"
+            }
         }
 
         // Initialize declination from prefs
         sensorFusion.setDeclination(prefs.getFloat(KEY_DECLINATION, 0f))
 
         val processA1: (ByteArray) -> Unit = { frame ->
-            if (frame.size >= 19) {
-                val ax = readS16LE(frame, 1).toShort()
-                val ay = readS16LE(frame, 3).toShort()
-                val az = readS16LE(frame, 5).toShort()
-                val gx = readS16LE(frame, 7).toShort()
-                val gy = readS16LE(frame, 9).toShort()
-                val gz = readS16LE(frame, 11).toShort()
-                val mx = readS16LE(frame, 13).toShort()
-                val my = readS16LE(frame, 15).toShort()
-                val mz = readS16LE(frame, 17).toShort()
-                sensorFusion.processA1(ax, ay, az, gx, gy, gz, mx, my, mz, System.currentTimeMillis())
+            if (frame.size >= 20) {
+                val now = System.currentTimeMillis()
+                val dt = if (lastA1Time > 0L) (now - lastA1Time) / 1000f else 0.02f
+                lastA1Time = now
+
+                val ax = readS16LE(frame, 2).toShort()
+                val ay = readS16LE(frame, 4).toShort()
+                val az = readS16LE(frame, 6).toShort()
+                val gx = readS16LE(frame, 8).toShort()
+                val gy = readS16LE(frame, 10).toShort()
+                val gz = readS16LE(frame, 12).toShort()
+                val mx = readS16LE(frame, 14).toShort()
+                val my = readS16LE(frame, 16).toShort()
+                val mz = readS16LE(frame, 18).toShort()
+
+                _rawImuData.value = RawImuData(ax, ay, az, gx, gy, gz, mx, my, mz)
+
+                if (sensorFusion.isManualCalActive) {
+                    sensorFusion.feedManualMagSample(mx, my)
+                }
+                if (sensorFusion.isGyroBiasCalActive) {
+                    sensorFusion.feedGyroBiasSample(gx, gy, gz)
+                }
+
+                // Apply SensorFusion processing
+                sensorFusion.processA1(ax, ay, az, gx, gy, gz, mx, my, mz, now, accelRotated180 = false)
+                
+                // Continuous integration for verification in UI
+                _calibDegreesTurned.value += sensorFusion.getState().gyroZDegS * dt
             }
         }
 
         val processA2: (ByteArray) -> Unit = { frame ->
-            if (frame.size >= 13) {
-                val hdg = readU16LE(frame, 1) / 100f
-                val pitch = readS16LE(frame, 3) / 100f
-                val roll = readS16LE(frame, 5) / 100f
-                val acc = readU16LE(frame, 7) / 100f
-                val base = readU16LE(frame, 9) / 1000f
-                val qual = frame[11].toInt() and 0xFF
-                val sats = frame[12].toInt() and 0xFF
+            if (frame.size >= 17) {
+                val qual = frame[5].toInt() and 0xFF
+                val base = readU16LE(frame, 6) / 1000f
+                val pitch = readS16LE(frame, 8) / 100f
+                val roll = readS16LE(frame, 10) / 100f
+                val hdg = readU16LE(frame, 12) / 100f
+                val acc = readU16LE(frame, 14) / 1000f
+                val sats = frame[16].toInt() and 0xFF
+
                 sensorFusion.processA2(hdg, pitch, roll, acc, base, qual, sats, System.currentTimeMillis())
             }
         }
 
+        viewModelScope.launch { imuManager.imuA1Data.collect { processA1(it) } }
         viewModelScope.launch { motorManager.imuA1Data.collect { processA1(it) } }
         viewModelScope.launch { gpsManager.imuA1Data.collect { processA1(it) } }
+        viewModelScope.launch { imuManager.gnssA2Data.collect { processA2(it) } }
         viewModelScope.launch { motorManager.gnssA2Data.collect { processA2(it) } }
         viewModelScope.launch { gpsManager.gnssA2Data.collect { processA2(it) } }
     }
@@ -577,7 +594,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _gpsFix.value = true; _gpsSpeedKnots.value = loc.speed * 1.94384f
             _gpsCourse.value = if (loc.hasBearing()) loc.bearing.toInt() else null
             BleRepository.setCurrentLocation(GeoPoint(loc.latitude, loc.longitude))
-            motorManager.updateGpsInfo(loc.latitude, loc.longitude, _gpsSpeedKnots.value, _gpsCourse.value)
+            motorManager.updateGpsInfo(loc.latitude, loc.longitude, _gpsSpeedKnots.value.toFloat(), _gpsCourse.value)
             val d = GeomagneticField(loc.latitude.toFloat(), loc.longitude.toFloat(), loc.altitude.toFloat(), System.currentTimeMillis()).declination
             if (abs(_declination.value - d) > 0.1f) { 
                 _declination.value = d
@@ -589,7 +606,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stopGpsUpdates() { fusedLocationClient.removeLocationUpdates(locationCallback); _gpsFix.value = false }
     fun startScan() = scanner.startScan(_scanAllNames.value)
-    fun startRemoteScan() = scanner.startRemoteScan(); fun startImuScan() = scanner.startImuScan(); fun startGpsScan() = scanner.startGpsScan(); fun stopScan() = scanner.stopScan(); fun setScanAllNames(all: Boolean) { _scanAllNames.value = all }
+    fun startRemoteScan() = scanner.startRemoteScan(); fun startImuScan() = scanner.startImuScan(); fun startGpsScan() = scanner.startGpsScan();
+    fun stopScan() = scanner.stopScan(); fun setScanAllNames(all: Boolean) { _scanAllNames.value = all }
+
 
     fun connect(disc: DiscoveredDevice) {
         viewModelScope.launch {
@@ -605,83 +624,108 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun disconnect() { motorManager.disconnectDevice(); imuManager.disconnectDevice(); gpsManager.disconnectDevice(); remote.disconnect().enqueue() }
-    
     fun setShowRawData(s: Boolean) { _showRawData.value = s; motorManager.setRawDataEnabled(s); imuManager.setRawDataEnabled(s); gpsManager.setRawDataEnabled(s); prefs.edit().putBoolean(KEY_SHOW_RAW, s).apply() }
     fun setEnableLogging(e: Boolean) { _enableLogging.value = e; motorManager.setLoggingEnabled(e); imuManager.setLoggingEnabled(e); gpsManager.setLoggingEnabled(e); prefs.edit().putBoolean(KEY_LOGGING, e).apply() }
     fun setEnableVoicePrompts(e: Boolean) = prefs.edit().putBoolean(KEY_VOICE, e).apply().also { _enableVoicePrompts.value = e; BleRepository.enableVoicePrompts = e }
     fun setShowMotorStatus(s: Boolean) = prefs.edit().putBoolean(KEY_SHOW_MOTOR_STATUS, s).apply().also { _showMotorStatus.value = s; BleRepository.showMotorStatus = s }
     fun setSteerScale(s: Int) = prefs.edit().putInt(KEY_STEER_SCALE, s).apply().also { _steerScale.value = s; BleRepository.steerScale = s }
-    fun setUseRudderSensor(u: Boolean) = prefs.edit().putBoolean(KEY_USE_RUDDER_SENSOR, u).apply().also { _useRudderSensor.value = u; BleRepository.useRudderSensor = u }
     fun setQmcLpfEnabled(e: Boolean) = prefs.edit().putBoolean(KEY_QMC_LPF, e).apply().also { _qmcLpfEnabled.value = e }
 
-    fun setApKp(v: Float) { _apKp.value = v; prefs.edit().putFloat(KEY_AP_KP, v).apply(); BleRepository.apKp = v }
-    fun setApKi(v: Float) { _apKi.value = v; prefs.edit().putFloat(KEY_AP_KI, v).apply(); BleRepository.apKi = v }
-    fun setApKd(v: Float) { _apKd.value = v; prefs.edit().putFloat(KEY_AP_KD, v).apply(); BleRepository.apKd = v }
+    fun connectToDevice(address: String) {
+        val device = bluetoothAdapter.getRemoteDevice(address)
+        viewModelScope.launch {
+            try {
+                motorManager.connectToDevice(device)
+                imuManager.connectToDevice(device)
+                gpsManager.connectToDevice(device)
+            } catch (e: Exception) {
+                Log.e(TAG, "Connect failed", e)
+            }
+        }
+        prefs.edit().putString(KEY_REMOTE_MAC, address).apply()
+    }
 
-    // Calibration Logic
+    fun disconnect() { motorManager.disconnectDevice(); imuManager.disconnectDevice(); gpsManager.disconnectDevice() }
+
+    fun speak(text: String) = BleRepository.speak(text)
+
+    fun calibrateZero() { steerProcessor.calibrateZero(_magX.value, _magY.value); saveSteerCalib() }
+    fun calibratePort() { steerProcessor.calibratePort(_magX.value, _magY.value); saveSteerCalib() }
+    fun calibrateStbd() { steerProcessor.calibrateStbd(_magX.value, _magY.value); saveSteerCalib() }
+
+    private fun saveSteerCalib() {
+        prefs.edit().putInt(KEY_CALIB_ZERO, steerProcessor.zeroX).putInt(KEY_CALIB_PORT, steerProcessor.portX).putInt(KEY_CALIB_STBD, steerProcessor.stbdX).apply()
+    }
+
+    fun startMagEllipseCalib() { magCalibrator.clear(); _isMagCalibrating.value = true }
+    fun stopMagEllipseCalib() {
+        _isMagCalibrating.value = false
+        val res = magCalibrator.fit()
+        if (res != null) { _magEllipseResult.value = res; steerProcessor.setEllipse(res.centerX, res.centerY, res.axisA, res.axisB, res.angle) }
+    }
+    fun saveMagEllipseCalib() {
+        val res = _magEllipseResult.value ?: return
+        prefs.edit().putFloat(KEY_MAG_ELLIPSE_CX, res.centerX).putFloat(KEY_MAG_ELLIPSE_CY, res.centerY).putFloat(KEY_MAG_ELLIPSE_A, res.axisA).putFloat(KEY_MAG_ELLIPSE_B, res.axisB).putFloat(KEY_MAG_ELLIPSE_ANGLE, res.angle).putBoolean(KEY_MAG_ELLIPSE_VALID, true).apply()
+    }
+    fun clearMagEllipseCalib() { _magEllipseResult.value = null; prefs.edit().remove(KEY_MAG_ELLIPSE_CX).apply() }
+
     private fun loadMagEllipse(): MagEllipseCalibrator.Result? {
-        if (!prefs.getBoolean(KEY_MAG_ELLIPSE_VALID, false)) return null
+        if (!prefs.contains(KEY_MAG_ELLIPSE_CX)) return null
         return MagEllipseCalibrator.Result(prefs.getFloat(KEY_MAG_ELLIPSE_CX, 0f), prefs.getFloat(KEY_MAG_ELLIPSE_CY, 0f), prefs.getFloat(KEY_MAG_ELLIPSE_A, 1f), prefs.getFloat(KEY_MAG_ELLIPSE_B, 1f), prefs.getFloat(KEY_MAG_ELLIPSE_ANGLE, 0f))
     }
-    fun startMagEllipseCalib() { magCalibrator.clear(); _isMagCalibrating.value = true; speak("Calibration started") }
-    fun stopMagEllipseCalib() { _isMagCalibrating.value = false; magCalibrator.fit()?.let { _magEllipseResult.value = it; speak("Fit success") } ?: speak("Fit failed") }
-    fun saveMagEllipseCalib() = _magEllipseResult.value?.let { res -> prefs.edit().putFloat(KEY_MAG_ELLIPSE_CX, res.centerX).putFloat(KEY_MAG_ELLIPSE_CY, res.centerY).putFloat(KEY_MAG_ELLIPSE_A, res.axisA).putFloat(KEY_MAG_ELLIPSE_B, res.axisB).putFloat(KEY_MAG_ELLIPSE_ANGLE, res.angle).putBoolean(KEY_MAG_ELLIPSE_VALID, true).apply(); speak("Saved") }
-    fun clearMagEllipseCalib() { _magEllipseResult.value = null; prefs.edit().remove(KEY_MAG_ELLIPSE_VALID).apply(); speak("Cleared") }
-    
-    fun calibrateZero() = getEllipseAngle()?.let { _magCalibZeroDeg.value = it; prefs.edit().putFloat(KEY_MAG_CALIB_ZERO_DEG, it).apply(); speak("Zero set") } ?: _magY.value.let { _calibZero.value = it; prefs.edit().putInt(KEY_CALIB_ZERO, it).apply(); speak("Zero set") }
-    fun calibratePort() = getEllipseAngle()?.let { _magCalibPortDeg.value = it; prefs.edit().putFloat(KEY_MAG_CALIB_PORT_DEG, it).apply(); speak("Port set") } ?: _magY.value.let { _calibPort.value = it; prefs.edit().putInt(KEY_CALIB_PORT, it).apply(); speak("Port set") }
-    fun calibrateStbd() = getEllipseAngle()?.let { _magCalibPortDeg.value = it; prefs.edit().putFloat(KEY_MAG_CALIB_STBD_DEG, it).apply(); speak("Starboard set") } ?: _magY.value.let { _calibStbd.value = it; prefs.edit().putInt(KEY_CALIB_STBD, it).apply(); speak("Starboard set") }
-    private fun getEllipseAngle() = _magEllipseResult.value?.let { res -> val norm = magCalibrator.normalize(_magX.value.toFloat(), _magY.value.toFloat(), res); Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat() }
-    
-    fun calibrateSteerBias() { steerProcessor.bias1 = _steerSensorA.value; steerProcessor.bias2 = _steerSensorB.value; prefs.edit().putInt(KEY_BIAS1, steerProcessor.bias1).putInt(KEY_BIAS2, steerProcessor.bias2).apply(); speak("Steer bias calibrated") }
-    
-    fun setSteerCalibCenter() { steerProcessor.getVectorA(_steerSensorA.value).let { a -> steerProcessor.getVectorB(_steerSensorB.value).let { b -> prefs.edit().putFloat(KEY_VEC_A_CENTER, a).putFloat(KEY_VEC_B_CENTER, b).apply() } }; recalculateAndSaveLut(); speak("Center set") }
-    fun setSteerCalibPort22() { steerProcessor.getVectorA(_steerSensorA.value).let { a -> steerProcessor.getVectorB(_steerSensorB.value).let { b -> prefs.edit().putFloat(KEY_VEC_A_PORT22, a).putFloat(KEY_VEC_B_PORT22, b).apply() } }; recalculateAndSaveLut(); speak("Port 22 set") }
-    fun setSteerCalibPort35() { steerProcessor.getVectorA(_steerSensorA.value).let { a -> steerProcessor.getVectorB(_steerSensorB.value).let { b -> prefs.edit().putFloat(KEY_VEC_A_PORT35, a).putFloat(KEY_VEC_B_PORT35, b).apply() } }; recalculateAndSaveLut(); speak("Port 35 set") }
-    fun setSteerCalibStbd22() { steerProcessor.getVectorA(_steerSensorA.value).let { a -> steerProcessor.getVectorB(_steerSensorB.value).let { b -> prefs.edit().putFloat(KEY_VEC_A_STBD22, a).putFloat(KEY_VEC_B_STBD22, b).apply() } }; recalculateAndSaveLut(); speak("Stbd 22 set") }
-    fun setSteerCalibStbd35() { steerProcessor.getVectorA(_steerSensorA.value).let { a -> steerProcessor.getVectorB(_steerSensorB.value).let { b -> prefs.edit().putFloat(KEY_VEC_A_STBD35, a).putFloat(KEY_VEC_B_STBD35, b).apply() } }; recalculateAndSaveLut(); speak("Stbd 35 set") }
 
-    private fun recalculateAndSaveLut() = getManualPoints().takeIf { it.size >= 2 }?.let { steerProcessor.fillTableFromPoints(it); saveSteerLutData() }
-    private fun loadSteerLutData() = prefs.getString(KEY_STEER_LUT_A, null)?.let { lutA -> prefs.getString(KEY_STEER_LUT_B, null)?.let { lutB -> try { steerProcessor.updateTable(lutA.split(",").map { it.toFloat() }.toFloatArray(), lutB.split(",").map { it.toFloat() }.toFloatArray()) } catch (e: Exception) {} } }
-    private fun saveSteerLutData() = prefs.edit().putString(KEY_STEER_LUT_A, steerProcessor.getPathA().joinToString(",") { "%.3f".format(it) }).putString(KEY_STEER_LUT_B, steerProcessor.getPathB().joinToString(",") { "%.3f".format(it) }).apply()
+    fun resetSFDegrees() {
+        _calibDegreesTurned.value = 0f
+    }
 
-    fun autoCalibPort() = autoCalib(KEY_VEC_A_PORT22, KEY_VEC_B_PORT22, -1, -22.5f)
-    fun autoCalibStbd() = autoCalib(KEY_VEC_A_STBD22, KEY_VEC_B_STBD22, 1, 22.5f)
-    private fun autoCalib(keyA: String, keyB: String, dir: Int, angle: Float) {
-        viewModelScope.launch {
-            val tA = prefs.getFloat(keyA, -9999f); val tB = prefs.getFloat(keyB, -9999f)
-            if (tA == -9999f) { speak("Error: target not set"); return@launch }
-            moveToAngle(0f); delay(1000L); val start = System.currentTimeMillis(); val samples = mutableListOf<Triple<Float, Float, Long>>()
-            val drive = launch { while(true) { BleRepository.adjustSteer(dir); delay(50) } }
-            while (System.currentTimeMillis() - start < 15000L) {
-                val cA = steerProcessor.getVectorA(_steerSensorA.value); val cB = steerProcessor.getVectorB(_steerSensorB.value)
-                samples.add(Triple(cA, cB, System.currentTimeMillis() - start))
-                if (sqrt(((cA - tA).pow(2) + (cB - tB).pow(2)).toDouble()) < 15.0) break; delay(50)
-            }
-            drive.cancel(); samples.lastOrNull()?.let { last ->
-                val totalTime = last.third; val timedPoints = samples.map { Triple(it.first, it.second, (it.third.toFloat() / totalTime) * angle) }
-                steerProcessor.fillTableFromPoints(getManualPoints() + timedPoints); saveSteerLutData(); speak("Auto calibration success")
-            } ?: speak("Timed out")
+    fun startSFusionMagCal() {
+        sensorFusion.startManualMagCal()
+        _calibDegreesTurned.value = 0f
+        _isSFusionMagCalibrating.value = true
+        _sfMagCalStatus.value = "Starting..."
+        speak("Heading calibration started. Please rotate the boat 360 degrees.")
+    }
+
+    fun stopSFusionMagCal() {
+        if (sensorFusion.finishManualMagCal()) {
+            _isSFusionMagCalibrating.value = false
+            _sfMagCalStatus.value = "Calibrated: X=${"%.0f".format(sensorFusion.manualCalHardIronX)} Y=${"%.0f".format(sensorFusion.manualCalHardIronY)}"
+            prefs.edit().putFloat(KEY_SF_MAG_BIAS_X, sensorFusion.manualCalHardIronX)
+                .putFloat(KEY_SF_MAG_BIAS_Y, sensorFusion.manualCalHardIronY).apply()
+            speak("Heading calibration complete")
+        } else {
+            _isSFusionMagCalibrating.value = false
+            _sfMagCalStatus.value = "Failed: Not enough data"
+            speak("Calibration failed, not enough data")
         }
     }
-    private fun getManualPoints() = mutableListOf<Triple<Float, Float, Float>>().apply {
-        if (prefs.contains(KEY_VEC_A_CENTER)) add(Triple(prefs.getFloat(KEY_VEC_A_CENTER, 0f), prefs.getFloat(KEY_VEC_B_CENTER, 0f), 0f))
-        if (prefs.contains(KEY_VEC_A_PORT22)) add(Triple(prefs.getFloat(KEY_VEC_A_PORT22, 0f), prefs.getFloat(KEY_VEC_B_PORT22, 0f), -22.5f))
-        if (prefs.contains(KEY_VEC_A_PORT35)) add(Triple(prefs.getFloat(KEY_VEC_A_PORT35, 0f), prefs.getFloat(KEY_VEC_B_PORT35, 0f), -35f))
-        if (prefs.contains(KEY_VEC_A_STBD22)) add(Triple(prefs.getFloat(KEY_VEC_A_STBD22, 0f), prefs.getFloat(KEY_VEC_B_STBD22, 0f), 22.5f))
-        if (prefs.contains(KEY_VEC_A_STBD35)) add(Triple(prefs.getFloat(KEY_VEC_A_STBD35, 0f), prefs.getFloat(KEY_VEC_B_STBD35, 0f), 35f))
+
+    fun startSFusionGyroCal() {
+        sensorFusion.startGyroBiasCal()
+        _isSFusionGyroCalibrating.value = true
+        _sfGyroCalStatus.value = "Starting..."
+        speak("Gyro calibration started. Keep the boat steady.")
     }
-    private suspend fun moveToAngle(target: Float) {
-        val start = System.currentTimeMillis()
-        while (abs(_steerSensorAngle.value - target) > 2.0f && System.currentTimeMillis() - start < 5000L) { BleRepository.adjustSteer(if (target > _steerSensorAngle.value) 1 else -1); delay(100) }
+    
+    fun stopSFusionGyroCal() {
+        if (sensorFusion.finishGyroBiasCal()) {
+            _isSFusionGyroCalibrating.value = false
+            _sfGyroCalStatus.value = "Calibrated: Z=${"%.3f".format(sensorFusion.gyroBiasZ)}"
+            prefs.edit().putFloat(KEY_SF_GYRO_BIAS_X, sensorFusion.gyroBiasX)
+                .putFloat(KEY_SF_GYRO_BIAS_Y, sensorFusion.gyroBiasY)
+                .putFloat(KEY_SF_GYRO_BIAS_Z, sensorFusion.gyroBiasZ).apply()
+            speak("Gyro calibration complete")
+        } else {
+            _isSFusionGyroCalibrating.value = false
+            _sfGyroCalStatus.value = "Failed: Not enough data"
+            speak("Gyro calibration failed")
+        }
     }
 
-//    fun startImuGyroCalibration() = imuManager.sendWitCalibration(0x01).also { _imuCalibStatus.value = "Gyro..." }
-//    fun startImuMagCalibration() = imuManager.sendWitCalibration(0x02).also { _imuCalibStatus.value = "Mag..." }
-//    fun saveImuCalibration() = imuManager.sendWitCalibration(0x00).also { _imuCalibStatus.value = "Idle" }
-    fun resetHeadingOffset() = _headingOffset.value.let { _headingOffset.value = 0f; prefs.edit().remove(KEY_HEADING_OFFSET).apply() }
-    fun disconnectRemote() = prefs.edit().remove(KEY_REMOTE_MAC).apply().also { remote.disconnect().enqueue() }
+    private fun loadWaypoints() = prefs.getString(KEY_WAYPOINTS, null)?.split(";")?.filter { it.isNotBlank() }?.map {
+        it.split(",").let { pts -> Waypoint(pts[0], GeoPoint(pts[1].toDouble(), pts[2].toDouble())) }
+    } ?: emptyList()
+    private fun saveWaypoints(points: List<Waypoint>) = prefs.edit().putString(KEY_WAYPOINTS, points.joinToString(";") { "${it.name},${it.point.latitude},${it.point.longitude}" }).apply()
 
     fun saveLocation(name: String) = (targetLocation.value ?: currentLocation.value)?.let { loc ->
         val updated = waypoints.value.toMutableList().apply { add(Waypoint(name, loc)) }
@@ -692,20 +736,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         BleRepository.setWaypoints(updated); saveWaypoints(updated); if (targetLocation.value?.latitude == waypoint.point.latitude) BleRepository.setTarget(null, null)
     }
 
-    fun clearWaypoints() = BleRepository.setWaypoints(emptyList()).also { saveWaypoints(emptyList()); BleRepository.setTarget(null, null); speak("Cleared") }
-    fun setTargetLocation(loc: GeoPoint?, name: String? = null) = BleRepository.setTarget(loc, name).also { if (loc != null) speak("Target set") }
-
-    private fun loadWaypoints() = prefs.getString(KEY_WAYPOINTS, null)?.split(";")?.filter { it.isNotBlank() }?.map {
-        it.split(",").let { pts -> Waypoint(pts[0], GeoPoint(pts[1].toDouble(), pts[2].toDouble())) }
-    } ?: emptyList()
-    private fun saveWaypoints(points: List<Waypoint>) = prefs.edit().putString(KEY_WAYPOINTS, points.joinToString(";") { "${it.name},${it.point.latitude},${it.point.longitude}" }).apply()
-
     override fun onCleared() {
         super.onCleared()
         stopGpsUpdates()
     }
+    fun clearWaypoints() = BleRepository.setWaypoints(emptyList()).also { saveWaypoints(emptyList()); BleRepository.setTarget(null, null); speak("Cleared") }
+    fun setTargetLocation(loc: GeoPoint?, name: String? = null) = BleRepository.setTarget(loc, name).also { if (loc != null) speak("Target set") }
 
-    private fun readS32LE(d: ByteArray, o: Int) = if (o + 3 >= d.size) 0 else (d[o].toInt() and 0xFF) or ((d[o+1].toInt() and 0xFF) shl 8) or ((d[o+2].toInt() and 0xFF) shl 16) or ((d[o+3].toInt() and 0xFF) shl 24)
-    private fun readU16LE(d: ByteArray, o: Int) = if (o + 1 >= d.size) 0 else (d[o].toInt() and 0xFF) or ((d[o+1].toInt() and 0xFF) shl 8)
-    private fun readS16LE(d: ByteArray, o: Int) = if (o + 1 >= d.size) 0 else ((d[o].toInt() and 0xFF) or ((d[o+1].toInt() and 0xFF) shl 8)).toShort().toInt()
+    fun setApKp(v: Float) { _apKp.value = v; prefs.edit().putFloat(KEY_AP_KP, v).apply(); BleRepository.apKp = v }
+    fun setApKi(v: Float) { _apKi.value = v; prefs.edit().putFloat(KEY_AP_KI, v).apply(); BleRepository.apKi = v }
+    fun setApKd(v: Float) { _apKd.value = v; prefs.edit().putFloat(KEY_AP_KD, v).apply(); BleRepository.apKd = v }
+    fun setUseRudderSensor(v: Boolean) { _useRudderSensor.value = v; prefs.edit().putBoolean(KEY_USE_RUDDER_SENSOR, v).apply(); BleRepository.useRudderSensor = v }
+
+    // Helper methods for reading BLE data
+    private fun readS16LE(data: ByteArray, offset: Int): Int {
+        return (data[offset].toInt() and 0xFF) or (data[offset + 1].toInt() shl 8)
+    }
+    private fun readU16LE(data: ByteArray, offset: Int): Int {
+        return (data[offset].toInt() and 0xFF) or ((data[offset + 1].toInt() and 0xFF) shl 8)
+    }
+    private fun readS32LE(data: ByteArray, offset: Int): Int {
+        return (data[offset].toInt() and 0xFF) or ((data[offset + 1].toInt() and 0xFF) shl 8) or ((data[offset + 2].toInt() and 0xFF) shl 16) or (data[offset + 3].toInt() shl 24)
+    }
 }

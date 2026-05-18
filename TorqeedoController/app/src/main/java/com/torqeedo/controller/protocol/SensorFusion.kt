@@ -67,6 +67,7 @@ class SensorFusion {
         val autoDeadbandDeg:      Float   = 2f,
         val magCalibrated:        Boolean = false,
         val rawMagHeadingDeg:     Float   = 0f,    // mag heading before declination/bias
+        val magHeadingDeg:        Float   = 0f,    // mag heading after calibration + declination
         val magDeclinationDeg:    Float   = 0f,    // auto-computed from GPS position
         val magSpikeRejected:     Boolean = false, // true when last A1 mag reading was rejected
         val tarMisalignDeg:       Float   = 0f,
@@ -219,6 +220,9 @@ class SensorFusion {
         if (isManualCalActive) manualCalPoints.add(MagCalPoint(mx.toFloat(), my.toFloat()))
     }
 
+    val manualMagCalProgress: Int get() = if (!isManualCalActive) 0 else (manualCalPoints.size * 100 / 36).coerceAtMost(100)
+    val manualMagCalSampleCount: Int get() = manualCalPoints.size
+
     /** Compute hard-iron offsets from collected samples. Returns true if enough data. */
     fun finishManualMagCal(): Boolean {
         isManualCalActive = false
@@ -240,6 +244,9 @@ class SensorFusion {
         if (isGyroBiasCalActive)
             gyroBiasSamples.add(Triple(gx.toFloat(), gy.toFloat(), gz.toFloat()))
     }
+
+    val gyroBiasCalProgress: Int get() = if (!isGyroBiasCalActive) 0 else (gyroBiasSamples.size * 100 / 100).coerceAtMost(100)
+    val gyroBiasCalSampleCount: Int get() = gyroBiasSamples.size
 
     fun finishGyroBiasCal(): Boolean {
         isGyroBiasCalActive = false
@@ -767,6 +774,7 @@ class SensorFusion {
             autoDeadbandDeg  = autoDeadband,
             magCalibrated    = magCalibrated,
             rawMagHeadingDeg = rawMagHeading,
+            magHeadingDeg    = magHeading,
             source           = if (useKalman) "kf:imu+mag" else "cf:imu+mag",
             debugMsg         = "A1: gz=${"%.2f".format(gyroZDegS)} mag=${"%.1f".format(magHeading)} tilt=${"%.1f".format(tiltDeg)} sea=${"%.2f".format(seaState)} db=${"%.1f".format(autoDeadband)}° conf=${"%.2f".format(state.headingConf)} $filterLabel → ${"%.1f".format(fused)}"
         )

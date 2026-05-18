@@ -278,10 +278,10 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                     }
                 }
                 IMU_A1_HEADER -> {
-                    // A1 packet is 19 bytes: [0xA1, ax*2, ay*2, az*2, gx*2, gy*2, gz*2, mx*2, my*2, mz*2]
-                    if (rxBuffer.size >= 19) {
-                        val frame = rxBuffer.take(19).toByteArray()
-                        repeat(19) { rxBuffer.removeAt(0) }
+                    // A1 packet is 20 bytes: [0xA1, seq, ax*2, ay*2, az*2, gx*2, gy*2, gz*2, mx*2, my*2, mz*2]
+                    if (rxBuffer.size >= 20) {
+                        val frame = rxBuffer.take(20).toByteArray()
+                        repeat(20) { rxBuffer.removeAt(0) }
                         _imuA1Data.tryEmit(frame)
                         if (isRawDataEnabled) {
                             logToFile("RECV_IMU_A1", frame)
@@ -290,10 +290,10 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                     } else return
                 }
                 GNSS_A2_HEADER -> {
-                    // A2 packet is 13 bytes: [0xA2, hdg*2, pitch*2, roll*2, acc*2, base*2, qual, sats]
-                    if (rxBuffer.size >= 13) {
-                        val frame = rxBuffer.take(13).toByteArray()
-                        repeat(13) { rxBuffer.removeAt(0) }
+                    // A2 packet is 17 bytes: [0xA2, seq, ..., hdg*2, pitch*2, roll*2, acc*2, base*2, qual, sats]
+                    if (rxBuffer.size >= 17) {
+                        val frame = rxBuffer.take(17).toByteArray()
+                        repeat(17) { rxBuffer.removeAt(0) }
                         _gnssA2Data.tryEmit(frame)
                         if (isRawDataEnabled) {
                             logToFile("RECV_GNSS_A2", frame)

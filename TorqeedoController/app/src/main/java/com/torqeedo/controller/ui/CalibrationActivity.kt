@@ -34,52 +34,14 @@ class CalibrationActivity : AppCompatActivity() {
             finish()
         }
 
-//        // Manual Drive Buttons (Hold to repeat)
-//        binding.btnSteerLeft.setOnTouchListener { v, event ->
-//            when (event.action) {
-//                MotionEvent.ACTION_DOWN -> {
-//                    v.isPressed = true
-//                    vm.startSteerRepeat(-1)
-//                }
-//                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-//                    v.isPressed = false
-//                    vm.stopSteerRepeat()
-//                    v.performClick()
-//                }
-//            }
-//            true
-//        }
-//        binding.btnSteerRight.setOnTouchListener { v, event ->
-//            when (event.action) {
-//                MotionEvent.ACTION_DOWN -> {
-//                    v.isPressed = true
-//                    vm.startSteerRepeat(1)
-//                }
-//                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-//                    v.isPressed = false
-//                    vm.stopSteerRepeat()
-//                    v.performClick()
-//                }
-//            }
-//            true
-//        }
-//
-//        binding.btnCalibHallBias.setOnClickListener {
-//            vm.calibrateSteerBias()
-//        }
-//
-//        // Manual Hall Calibration
-//        binding.btnSetCenter.setOnClickListener { vm.setSteerCalibCenter() }
-//        binding.btnSetPort22.setOnClickListener { vm.setSteerCalibPort22() }
-//        binding.btnSetPort35.setOnClickListener { vm.setSteerCalibPort35() }
-//        binding.btnSetStbd22.setOnClickListener { vm.setSteerCalibStbd22() }
-//        binding.btnSetStbd35.setOnClickListener { vm.setSteerCalibStbd35() }
-//
-//        // Auto Hall Calibration
-//        binding.btnAutoCalibPort.setOnClickListener { vm.autoCalibPort() }
-//        binding.btnAutoCalibStbd.setOnClickListener { vm.autoCalibStbd() }
+        // SensorFusion 0xA1 Calibration
+        binding.btnStartSFMag.setOnClickListener { vm.startSFusionMagCal() }
+        binding.btnStopSFMag.setOnClickListener { vm.stopSFusionMagCal() }
+        binding.btnStartSFGyro.setOnClickListener { vm.startSFusionGyroCal() }
+        binding.btnStopSFGyro.setOnClickListener { vm.stopSFusionGyroCal() }
+        binding.btnResetSFDegrees.setOnClickListener { vm.resetSFDegrees() }
 
-        // Mag Ellipse Calibration
+        // Mag Ellipse Calibration (Steering)
         binding.btnStartMagEllipse.setOnClickListener {
             vm.startMagEllipseCalib()
             showSnack("Recording magnetic samples...")
@@ -109,40 +71,61 @@ class CalibrationActivity : AppCompatActivity() {
             vm.calibrateStbd()
             showSnack("Starboard max position calibrated")
         }
-
-//        binding.btnCalibGyro.setOnClickListener {
-//            vm.startImuGyroCalibration()
-//            showSnack("Gyro calibration started")
-//        }
-//
-//        binding.btnCalibMag.setOnClickListener {
-//            vm.startImuMagCalibration()
-//            showSnack("Magnetic calibration started")
-//        }
-//
-//        binding.btnSaveImu.setOnClickListener {
-//            vm.saveImuCalibration()
-//            showSnack("Calibration saved")
-//        }
     }
 
     private fun observeState() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-//                launch {
-//                    vm.steerSensorA.collectLatest { a -> binding.tvHallA.text = "A: $a" }
-//                }
-//                launch {
-//                    vm.steerSensorB.collectLatest { b -> binding.tvHallB.text = "B: $b" }
-//                }
-//                launch {
-//                    vm.steerSensorRatio.collectLatest { r -> binding.tvHallRatio.text = "R: %.3f".format(r) }
-//                }
-//                launch {
-//                    vm.steerSensorAngle.collectLatest { angle ->
-//                        binding.tvHallAngle.text = "Angle: %.1f°".format(angle)
-//                    }
-//                }
+                // 0xA1 Raw Data & Integration
+                launch {
+                    vm.rawImuData.collectLatest { data ->
+                        binding.tvRawMx.text = "MX: ${data.mx}"
+                        binding.tvRawMy.text = "MY: ${data.my}"
+                        binding.tvRawMz.text = "MZ: ${data.mz}"
+                        binding.tvRawGx.text = "GX: ${data.gx}"
+                        binding.tvRawGy.text = "GY: ${data.gy}"
+                        binding.tvRawGz.text = "GZ: ${data.gz}"
+                    }
+                }
+                launch {
+                    vm.calibDegreesTurned.collectLatest { deg ->
+                        binding.tvCalibDegrees.text = "Turned: %.1f°".format(deg)
+                    }
+                }
+                launch {
+                    vm.isSFusionMagCalibrating.collectLatest { active ->
+                        binding.btnStartSFMag.isEnabled = !active
+                        binding.btnStopSFMag.isEnabled = active
+                    }
+                }
+                launch {
+                    vm.isSFusionGyroCalibrating.collectLatest { active ->
+                        binding.btnStartSFGyro.isEnabled = !active
+                        binding.btnStopSFGyro.isEnabled = active
+                    }
+                }
+                
+                // SensorFusion Fused Data
+                launch {
+                    vm.fusedState.collectLatest { state ->
+                        binding.tvFusedHeading.text = "%.1f°".format(state.headingDeg)
+                        binding.tvMagHeading.text = "%.1f°".format(state.magHeadingDeg)
+                    }
+                }
+                
+                // Calibration Status
+                launch {
+                    vm.sfMagCalStatus.collectLatest { status ->
+                        binding.tvMagCalStatus.text = "Status: $status"
+                    }
+                }
+                launch {
+                    vm.sfGyroCalStatus.collectLatest { status ->
+                        binding.tvGyroCalStatus.text = "Status: $status"
+                    }
+                }
+
+                // Rudder/Ellipse Data
                 launch {
                     vm.magX.collectLatest { x -> binding.tvMagX.text = "X: $x" }
                 }
@@ -159,29 +142,10 @@ class CalibrationActivity : AppCompatActivity() {
                 }
                 launch {
                     vm.isMagCalibrating.collectLatest { isCalibrating ->
-                        if (isCalibrating) {
-                            binding.btnStartMagEllipse.isEnabled = false
-                            binding.btnStopMagEllipse.isEnabled = true
-                        } else {
-                            binding.btnStartMagEllipse.isEnabled = true
-                            binding.btnStopMagEllipse.isEnabled = false
-                        }
+                        binding.btnStartMagEllipse.isEnabled = !isCalibrating
+                        binding.btnStopMagEllipse.isEnabled = isCalibrating
                     }
                 }
-//                launch {
-//                    vm.witYaw.collectLatest { yaw -> binding.tvYaw.text = "%.1f°".format(yaw) }
-//                }
-//                launch {
-//                    vm.witPitch.collectLatest { pitch -> binding.tvPitch.text = "%.1f°".format(pitch) }
-//                }
-//                launch {
-//                    vm.witRoll.collectLatest { roll -> binding.tvRoll.text = "%.1f°".format(roll) }
-//                }
-//                launch {
-//                    vm.imuCalibStatus.collectLatest { status ->
-//                        binding.tvImuStatus.text = "Status: $status"
-//                    }
-//                }
             }
         }
     }

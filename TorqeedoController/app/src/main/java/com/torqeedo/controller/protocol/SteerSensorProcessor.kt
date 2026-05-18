@@ -47,6 +47,11 @@ class SteerSensorProcessor {
     private var filteredAngle = 0f
     private var firstSample = true
 
+    // Calibration points
+    var zeroX: Int = 0; var zeroY: Int = 0
+    var portX: Int = 0; var portY: Int = 0
+    var stbdX: Int = 0; var stbdY: Int = 0
+
     init {
         resetTable()
     }
@@ -64,6 +69,17 @@ class SteerSensorProcessor {
             pathB[i] = (Math.sin(rad - Math.toRadians(22.5)) * 1000.0).toFloat()
         }
         firstSample = true
+    }
+
+    fun calibrateZero(x: Int, y: Int) { zeroX = x; zeroY = y }
+    fun calibratePort(x: Int, y: Int) { portX = x; portY = y }
+    fun calibrateStbd(x: Int, y: Int) { stbdX = x; stbdY = y }
+
+    fun setEllipse(cx: Float, cy: Float, a: Float, b: Float, angle: Float) {
+        // This would ideally re-generate the table based on ellipse parameters
+        // For now, we update the bias based on the ellipse center
+        bias1 = cx.toInt()
+        bias2 = cy.toInt()
     }
 
     /**
