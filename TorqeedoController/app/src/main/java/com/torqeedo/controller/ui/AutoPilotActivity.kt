@@ -171,6 +171,29 @@ class AutoPilotActivity : AppCompatActivity() {
                 vm.setApMaxRate(value)
             }
         }
+
+        // AP Delay Tuning
+        binding.sbDelay.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) vm.setApDelay(progress.toLong())
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+        binding.etDelay.setOnEditorActionListener { v, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                val value = v.text.toString().toLongOrNull() ?: 0L
+                vm.setApDelay(value.coerceIn(0L, 1000L))
+                v.clearFocus()
+                true
+            } else false
+        }
+        binding.etDelay.doAfterTextChanged { s ->
+            if (binding.etDelay.hasFocus()) {
+                val value = s.toString().toLongOrNull() ?: 0L
+                vm.setApDelay(value)
+            }
+        }
     }
 
     private fun observeState() {
@@ -280,6 +303,13 @@ class AutoPilotActivity : AppCompatActivity() {
                     vm.apMaxRate.collectLatest { rate ->
                         if (!binding.etMaxRate.hasFocus()) binding.etMaxRate.setText("%.0f".format(rate))
                         binding.sbMaxRate.progress = rate.toInt()
+                    }
+                }
+
+                launch {
+                    vm.apDelay.collectLatest { delay ->
+                        if (!binding.etDelay.hasFocus()) binding.etDelay.setText("%d".format(delay))
+                        binding.sbDelay.progress = delay.toInt()
                     }
                 }
 

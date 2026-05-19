@@ -55,7 +55,7 @@ void motorDrive(char dir);
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
         bleConnected = true;
-        pServer->updateConnParams(connInfo.getConnHandle(), 6, 12, 0, 400);
+        //pServer->updateConnParams(connInfo.getConnHandle(), 6, 12, 0, 400);
     }
     void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
         bleConnected = false;
@@ -69,7 +69,10 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 class AE03Callbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo& connInfo) override {
         const std::string& value = pCharacteristic->getValue();
-        if(value.length() != 5) return;
+        if(value.length() != 5){
+            Serial.println("AE03 too short");
+            return;
+        } 
         const uint8_t *d = (const uint8_t*)value.data();
         if(d[0] != 's') return;
         char dir = d[1];
@@ -152,7 +155,7 @@ void sendSensorPacket() {
     int16_t raw_z = Wire.read() | (Wire.read() << 8);
 
     // DEBUG: Print raw values
-    Serial.printf("[QMC6308] X=%d Y=%d Z=%d\n", raw_x, raw_y, raw_z);
+    //Serial.printf("[QMC6308] X=%d Y=%d Z=%d\n", raw_x, raw_y, raw_z);
 
     // Pack 8-byte BLE packet:
     // [0] Header, [1] Seq, [2-3] X, [4-5] Y, [6-7] Z

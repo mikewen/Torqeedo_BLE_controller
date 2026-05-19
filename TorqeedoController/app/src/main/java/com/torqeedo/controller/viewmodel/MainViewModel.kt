@@ -81,6 +81,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_AP_KD = "ap_kd"
         private const val KEY_AP_DEADBAND = "ap_deadband"
         private const val KEY_AP_MAX_RATE = "ap_max_rate"
+        private const val KEY_AP_DELAY = "ap_delay"
         private const val KEY_USE_RUDDER_SENSOR = "use_rudder_sensor"
         private const val KEY_QMC_LPF = "qmc_lpf"
 
@@ -95,6 +96,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val DEFAULT_AP_KD = 1.0f
         private const val DEFAULT_AP_DEADBAND = 3.0f
         private const val DEFAULT_AP_MAX_RATE = 25f
+        private const val DEFAULT_AP_DELAY = 200L
 
         private const val KEY_WAYPOINTS = "waypoints_v3"
         private const val KEY_SCAN_ALL = "scan_all_names"
@@ -297,6 +299,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val apDeadband: StateFlow<Float> = _apDeadband.asStateFlow()
     private val _apMaxRate = MutableStateFlow(prefs.getFloat(KEY_AP_MAX_RATE, DEFAULT_AP_MAX_RATE))
     val apMaxRate: StateFlow<Float> = _apMaxRate.asStateFlow()
+    private val _apDelay = MutableStateFlow(prefs.getLong(KEY_AP_DELAY, DEFAULT_AP_DELAY))
+    val apDelay: StateFlow<Long> = _apDelay.asStateFlow()
     private val _useRudderSensor = MutableStateFlow(prefs.getBoolean(KEY_USE_RUDDER_SENSOR, false))
     val useRudderSensor: StateFlow<Boolean> = _useRudderSensor.asStateFlow()
 
@@ -354,6 +358,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         BleRepository.apKd = _apKd.value
         BleRepository.apDeadband = _apDeadband.value
         BleRepository.maxTurnRate = _apMaxRate.value
+        BleRepository.autoPilotDelay = _apDelay.value
         BleRepository.useRudderSensor = _useRudderSensor.value
         BleRepository.steerScale = _steerScale.value
         BleRepository.enableVoicePrompts = _enableVoicePrompts.value
@@ -617,13 +622,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun resetSteer() {
         BleRepository.stopSteerRepeat()
         viewModelScope.launch {
+            BleRepository.steerValue.value = 0
+            /*
             while (BleRepository.steerValue.value != 0) {
                 val Councilor = BleRepository.steerValue.value
                 BleRepository.adjustSteer(if (Councilor > 0) -1 else 1)
                 delay(80L)
             }
+            */
         }
-        speak("Straight")
+        //speak("Straight")
     }
 
     @SuppressLint("MissingPermission")
@@ -665,13 +673,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 when {
                     disc.name.contains("LOOKBON", true) -> remote.connectToDevice(disc.device)
-                    // More specific matching for motor/steering control
-                    disc.name.contains("UART", true) || disc.name.contains("Steer", true) -> motorManager.connectToDevice(disc.device)
-                    disc.name.contains("GPS", true) || disc.name.contains("IMU", true) -> {
-                        // Decide if it should be gpsManager or imuManager
-                        if (disc.name.contains("GPS", true)) gpsManager.connectToDevice(disc.device)
-                        else imuManager.connectToDevice(disc.device)
-                    }
+                    disc.name.contains("UART", true) || disc.name.contains("Steer", true) || disc.name.contains("AC6328", true) -> motorManager.connectToDevice(disc.device)
+                    disc.name.contains("GPS", true) -> gpsManager.connectToDevice(disc.device)
+                    disc.name.contains("IMU", true) -> imuManager.connectToDevice(disc.device)
                     else -> motorManager.connectToDevice(disc.device)
                 }
                 stopScan()
@@ -803,6 +807,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setApKd(v: Float) { _apKd.value = v; prefs.edit().putFloat(KEY_AP_KD, v).apply(); BleRepository.apKd = v }
     fun setApDeadband(v: Float) { _apDeadband.value = v; prefs.edit().putFloat(KEY_AP_DEADBAND, v).apply(); BleRepository.apDeadband = v }
     fun setApMaxRate(v: Float) { _apMaxRate.value = v; prefs.edit().putFloat(KEY_AP_MAX_RATE, v).apply(); BleRepository.maxTurnRate = v }
+    fun setApDelay(v: Long) { _apDelay.value = v; prefs.edit().putLong(KEY_AP_DELAY, v).apply(); BleRepository.autoPilotDelay = v }
     fun setUseRudderSensor(v: Boolean) { _useRudderSensor.value = v; prefs.edit().putBoolean(KEY_USE_RUDDER_SENSOR, v).apply(); BleRepository.useRudderSensor = v }
 
     // Helper methods for reading BLE data

@@ -102,8 +102,8 @@ class BleScanner(private val adapter: BluetoothAdapter) {
             .build()
 
         val filters = listOf(
-            ScanFilter.Builder().setDeviceName("IMU_GPS").build(),
-            ScanFilter.Builder().setDeviceName("BLE_GPS").build()
+            ScanFilter.Builder().setDeviceName("IMU").build(),
+            ScanFilter.Builder().setDeviceName("IMU_9050").build()
         )
         
         internalStartScan(filters, settings)

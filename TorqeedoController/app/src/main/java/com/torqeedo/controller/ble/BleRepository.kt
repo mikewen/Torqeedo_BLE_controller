@@ -35,10 +35,9 @@ object BleRepository : TextToSpeech.OnInitListener {
     // --- Constants ---
     const val SPEED_MAX = 1000
     const val SPEED_MIN = 0
-    const val STEER_MAX = 50
+    const val STEER_MAX = 100
     private const val STATUS_QUERY_DELAY = 500L
     private const val SENSOR_READ_DELAY = 200L
-    private const val AUTOPILOT_DELAY = 200L
     private const val STEER_REPEAT_DELAY = 80L
     private const val AUTOPILOT_MAX_I = 20f
 
@@ -72,6 +71,7 @@ object BleRepository : TextToSpeech.OnInitListener {
     var apKd = 1.0f
     var apDeadband = 3.0f
     var maxTurnRate = 25f
+    var autoPilotDelay = 200L
     var useRudderSensor = false
     var showMotorStatus = false
     var enableVoicePrompts = true
@@ -289,9 +289,12 @@ object BleRepository : TextToSpeech.OnInitListener {
 
     fun setSteerValue(value: Int) {
         val clamped = value.coerceIn(-STEER_MAX, STEER_MAX)
-        if (steerValue.value != clamped) {
+        val oldValue = steerValue.value
+        if (oldValue != clamped) {
+            val delta = clamped - oldValue
             steerValue.value = clamped
-            motorManager?.sendSteer(clamped)
+            val runtimeMs = abs(delta) * steerScale
+            motorManager?.sendSteer(delta, runtimeMs)
         }
     }
 
@@ -330,11 +333,34 @@ object BleRepository : TextToSpeech.OnInitListener {
             speak("Auto pilot on, heading ${targetHeading.value.toInt()} degrees")
             startAutoPilotLoop()
         } else {
-            speak("Auto pilot off")
-            stopAutoPilotLoop()
+            if (autoPilotActive.value) {
+                speak("Auto pilot off")
+                stopAutoPilotLoop()
+                //resetSteer()
+                rudderPosition.value = 0.0f
+            }
         }
         autoPilotActive.value = active
     }
+
+    /*
+    fun resetSteer() {
+        stopSteerRepeat()
+        if (useRudderSensor) {
+            scope.launch {
+                while (abs(rudderPosition.value) > 1.5f) {
+                    val delta = if (rudderPosition.value > 0) -1 else 1
+                    adjustSteer(delta)
+                    delay(STEER_REPEAT_DELAY)
+                }
+            }
+        } else {
+            //setSteerValue(0)
+            rudderPosition.value = 0.0f
+        }
+        //speak("Straight")
+    }
+    */
 
     fun adjustTargetHeading(delta: Float) {
         var newTarget = targetHeading.value + delta
@@ -385,7 +411,7 @@ object BleRepository : TextToSpeech.OnInitListener {
         autoPilotJob = scope.launch {
             while (true) {
                 updateAutoPilot()
-                delay(AUTOPILOT_DELAY)
+                delay(autoPilotDelay)
             }
         }
     }
@@ -397,7 +423,7 @@ object BleRepository : TextToSpeech.OnInitListener {
 
     private fun updateAutoPilot() {
         var apKrate = 1.2f
-        val maxStepPerUpdate = 4f
+        val maxStepPerUpdate = maxTurnRate * (autoPilotDelay / 1000f)
 
         if (!autoPilotActive.value) return
 
