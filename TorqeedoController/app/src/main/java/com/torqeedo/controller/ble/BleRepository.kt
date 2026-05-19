@@ -79,6 +79,7 @@ object BleRepository : TextToSpeech.OnInitListener {
     // --- PID Internal State ---
     private var autopilotLastError = 0f
     private var autopilotIntegral = 0f
+    private var isUpdatingAutoPilot = false
 
     // --- Voice Command Flow (ViewModels listen to this to call TTS) ---
     private val _voiceCommand = MutableSharedFlow<String>(extraBufferCapacity = 10)
@@ -346,19 +347,15 @@ object BleRepository : TextToSpeech.OnInitListener {
     /*
     fun resetSteer() {
         stopSteerRepeat()
-        if (useRudderSensor) {
-            scope.launch {
-                while (abs(rudderPosition.value) > 1.5f) {
-                    val delta = if (rudderPosition.value > 0) -1 else 1
-                    adjustSteer(delta)
-                    delay(STEER_REPEAT_DELAY)
-                }
+        scope.launch {
+            if (useRudderSensor) {
+                syncRudderToTarget(0f)
+            } else {
+                setSteerValue(0)
+                rudderPosition.value = 0.0f
             }
-        } else {
-            //setSteerValue(0)
-            rudderPosition.value = 0.0f
+            speak("Straight")
         }
-        //speak("Straight")
     }
     */
 
@@ -421,100 +418,98 @@ object BleRepository : TextToSpeech.OnInitListener {
         autoPilotJob = null
     }
 
-    private fun updateAutoPilot() {
-        var apKrate = 1.2f
-        val maxStepPerUpdate = maxTurnRate * (autoPilotDelay / 1000f)
+    private suspend fun syncRudderToTarget(target: Float) {
+        val maxAttempts = 8
+        for (i in 0 until maxAttempts) {
+            // Allow exit if AP is turned off, unless we are resetting to zero
+            if (!autoPilotActive.value && target != 0f) break
+            
+            val currentRudderPos = rudderPosition.value
+            val rudderError = target - currentRudderPos
 
+            if (abs(rudderError) < 1.5f) break
+
+            val step = if (rudderError > 0) 1 else -1
+            adjustSteer(step)
+            
+            // Trigger status query to get faster sensor update
+            motorManager?.sendSteerStatusQuery()
+            
+            // Wait for motor to move and sensor to update
+            delay(100)
+        }
+    }
+
+    private suspend fun updateAutoPilot() {
+        if (isUpdatingAutoPilot) return
         if (!autoPilotActive.value) return
+        
+        isUpdatingAutoPilot = true
+        try {
+            val apKrate = 1.2f
+            val maxStepPerUpdate = maxTurnRate * (autoPilotDelay / 1000f)
 
-        val current = trueHeading.value
-        val target = targetHeading.value
-        val yawRate = gyroZDegS.value
+            val current = trueHeading.value
+            val target = targetHeading.value
+            val yawRate = gyroZDegS.value
 
-        var error = target - current
+            var error = target - current
+            while (error > 180f) error -= 360f
+            while (error < -180f) error += 360f
 
-        while (error > 180f) error -= 360f
-        while (error < -180f) error += 360f
-
-        //--------------------------------------------------
-        // SOFT DEADBAND
-        //--------------------------------------------------
-
-        val effectiveError = when {
-            abs(error) < apDeadband -> {
+            //--------------------------------------------------
+            // SOFT DEADBAND
+            //--------------------------------------------------
+            val effectiveError = if (abs(error) < apDeadband) {
                 error * 0.2f
-            }
-            else -> {
+            } else {
                 sign(error) * (abs(error) - apDeadband)
             }
-        }
 
-        //--------------------------------------------------
-        // INTEGRAL MANAGEMENT
-        //--------------------------------------------------
-
-        if (abs(error) > apDeadband) {
-            autopilotIntegral += effectiveError * apKi
-            autopilotIntegral =
-                autopilotIntegral.coerceIn(-AUTOPILOT_MAX_I,AUTOPILOT_MAX_I)
-        } else {
-            // Slowly decay integral
-            autopilotIntegral *= 0.98f
-        }
-
-        //--------------------------------------------------
-        // GYRO YAW DAMPING
-        //--------------------------------------------------
-
-        val gyroAvailable =
-            (System.currentTimeMillis() - lastGyroUpdateTime) < 500
-
-        val yawDamping =
-            if (gyroAvailable)
-                yawRate * apKrate
-            else
-                0f
-
-        //--------------------------------------------------
-        // MAIN CONTROL LAW
-        //--------------------------------------------------
-
-        val rawOutput = (effectiveError * apKp) + autopilotIntegral - yawDamping
-
-        //--------------------------------------------------
-        // OUTPUT LIMIT
-        //--------------------------------------------------
-        val targetOutput = rawOutput.coerceIn(-100f, 100f)
-
-        //--------------------------------------------------
-        // STEERING SLEW RATE LIMITER
-        //--------------------------------------------------
-        val currentOutput = steerValue.value.toFloat()
-
-        val delta = (targetOutput - currentOutput).coerceIn(-maxStepPerUpdate,maxStepPerUpdate)
-
-        val output = currentOutput + delta
-
-        //--------------------------------------------------
-        // APPLY OUTPUT
-        //--------------------------------------------------
-        if (useRudderSensor) {
-
-            val currentRudderPos = rudderPosition.value
-            val rudderError = output - currentRudderPos
-
-            if (abs(rudderError) > 1.5f) {
-
-                val step =
-                    when {
-                        rudderError > 0 -> 1
-                        else -> -1
-                    }
-
-                adjustSteer(step)
+            //--------------------------------------------------
+            // INTEGRAL MANAGEMENT
+            //--------------------------------------------------
+            if (abs(error) > apDeadband) {
+                autopilotIntegral += effectiveError * apKi
+                autopilotIntegral = autopilotIntegral.coerceIn(-AUTOPILOT_MAX_I, AUTOPILOT_MAX_I)
+            } else {
+                // Slowly decay integral
+                autopilotIntegral *= 0.98f
             }
-        } else {
-            setSteerValue(output.toInt())
+
+            //--------------------------------------------------
+            // GYRO YAW DAMPING
+            //--------------------------------------------------
+            val gyroAvailable = (System.currentTimeMillis() - lastGyroUpdateTime) < 500
+            val yawDamping = if (gyroAvailable) yawRate * apKrate else 0f
+
+            //--------------------------------------------------
+            // MAIN CONTROL LAW
+            //--------------------------------------------------
+            val rawOutput = (effectiveError * apKp) + autopilotIntegral - yawDamping
+
+            //--------------------------------------------------
+            // OUTPUT LIMIT
+            //--------------------------------------------------
+            val targetOutput = rawOutput.coerceIn(-100f, 100f)
+
+            //--------------------------------------------------
+            // STEERING SLEW RATE LIMITER
+            //--------------------------------------------------
+            val currentOutput = if (useRudderSensor) rudderPosition.value else steerValue.value.toFloat()
+            val delta = (targetOutput - currentOutput).coerceIn(-maxStepPerUpdate, maxStepPerUpdate)
+            val output = currentOutput + delta
+
+            //--------------------------------------------------
+            // APPLY OUTPUT
+            //--------------------------------------------------
+            if (useRudderSensor) {
+                syncRudderToTarget(output)
+            } else {
+                setSteerValue(output.toInt())
+            }
+        } finally {
+            isUpdatingAutoPilot = false
         }
     }
 
