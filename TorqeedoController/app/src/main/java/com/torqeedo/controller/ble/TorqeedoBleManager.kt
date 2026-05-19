@@ -185,7 +185,7 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         }
 
         override fun initialize() {
-            requestMtu(100).enqueue()
+            //requestMtu(100).enqueue()
 
             setNotificationCallback(ae02Char)
                 .with { _, data ->

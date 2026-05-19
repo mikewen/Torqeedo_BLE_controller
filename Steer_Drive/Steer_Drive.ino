@@ -186,7 +186,7 @@ void setup() {
     Serial.println("=== ESP32 QMC6308 Boot ===");
 
     // I2C Initialization
-    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
+    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 100000);
     initQMC6308();
 
     // GPIO5 High Drive
@@ -237,7 +237,7 @@ void loop() {
 
     static uint32_t lastSensorTime = 0;
     // ~20Hz streaming (50ms interval)
-    if(bleConnected && (millis() - lastSensorTime >= 50)) {
+    if(bleConnected && (millis() - lastSensorTime >= 200)) {
         lastSensorTime = millis();
         sendSensorPacket();
     }
