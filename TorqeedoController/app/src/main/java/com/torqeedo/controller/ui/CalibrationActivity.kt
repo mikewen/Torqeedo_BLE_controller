@@ -61,15 +61,33 @@ class CalibrationActivity : AppCompatActivity() {
         // Legacy/Mag Rudder Calibration
         binding.btnCalibZero.setOnClickListener {
             vm.calibrateZero()
-            showSnack("Zero position calibrated")
+            showSnack("Zero position (0%) calibrated")
         }
         binding.btnCalibPort.setOnClickListener {
             vm.calibratePort()
-            showSnack("Port max position calibrated")
+            showSnack("Port position (-100%) calibrated")
         }
         binding.btnCalibStbd.setOnClickListener {
             vm.calibrateStbd()
-            showSnack("Starboard max position calibrated")
+            showSnack("Starboard position (100%) calibrated")
+        }
+
+        // Multi-point Calibration
+        binding.btnAddCustomCalib.setOnClickListener {
+            val text = binding.etCustomCalib.text.toString()
+            val percent = text.toFloatOrNull()
+            if (percent != null && percent in -100f..100f) {
+                vm.addSteerCalibPoint(percent)
+                showSnack("Calibrated point at $percent%")
+                binding.etCustomCalib.setText("")
+            } else {
+                showSnack("Enter valid percentage (-100 to 100)")
+            }
+        }
+
+        binding.btnClearSteerCalib.setOnClickListener {
+            vm.clearSteerCalib()
+            showSnack("All steering calibration points cleared")
         }
     }
 

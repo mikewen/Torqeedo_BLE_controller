@@ -351,7 +351,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Ellipse Calibration"
+                        android:text="Ellipse Calibration (DEPRECATED)"
                         android:textColor="@color/text_secondary"
                         android:textSize="10sp"
                         android:layout_marginBottom="4dp" />
@@ -379,7 +379,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Physical Mapping (Set Rudder then click)"
+                        android:text="Vector Mapping (Add points at different rudder angles)"
                         android:textColor="@color/text_secondary"
                         android:textSize="10sp"
                         android:layout_marginBottom="4dp" />
@@ -387,14 +387,15 @@
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="horizontal">
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="8dp">
 
                         <Button
                             android:id="@+id/btnCalibPort"
                             style="@style/Widget.TorqeedoController.Button.Secondary"
                             android:layout_width="0dp" android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="Port Max"
+                            android:text="Port (-100)"
                             android:layout_marginEnd="4dp" />
 
                         <Button
@@ -402,7 +403,7 @@
                             style="@style/Widget.TorqeedoController.Button.Secondary"
                             android:layout_width="0dp" android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="Zero"
+                            android:text="Zero (0)"
                             android:layout_marginEnd="4dp" />
 
                         <Button
@@ -410,8 +411,42 @@
                             style="@style/Widget.TorqeedoController.Button.Secondary"
                             android:layout_width="0dp" android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="Stbd Max" />
+                            android:text="Stbd (100)" />
                     </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="8dp">
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:hint="Custom % (-100 to 100)"
+                            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense">
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/etCustomCalib"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:inputType="numberSigned|numberDecimal" />
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <Button
+                            android:id="@+id/btnAddCustomCalib"
+                            style="@style/Widget.TorqeedoController.Button.Secondary"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:text="Add" />
+                    </LinearLayout>
+
+                    <Button android:id="@+id/btnClearSteerCalib" style="@style/Widget.TorqeedoController.Button.Secondary"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:text="Clear All Points" />
+
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 

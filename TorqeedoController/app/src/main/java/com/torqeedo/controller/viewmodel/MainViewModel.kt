@@ -42,15 +42,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_REMOTE_MAC = "remote_mac"
         private const val KEY_STEER_SCALE = "steer_scale"
 
-        private const val KEY_CALIB_ZERO = "calib_zero"
-        private const val KEY_CALIB_PORT = "calib_port"
-        private const val KEY_CALIB_STBD = "calib_stbd"
+        private const val KEY_CALIB_POINTS = "steer_calib_points_v2"
 
         private const val KEY_DECLINATION = "declination"
         private const val KEY_HEADING_OFFSET = "heading_offset"
-
-        private const val KEY_BIAS1 = "steer_bias1"
-        private const val KEY_BIAS2 = "steer_bias2"
 
         private const val KEY_MAG_ELLIPSE_CX = "mag_ellipse_cx"
         private const val KEY_MAG_ELLIPSE_CY = "mag_ellipse_cy"
@@ -208,10 +203,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         heading
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
 
-    private val _calibZero = MutableStateFlow(prefs.getInt(KEY_CALIB_ZERO, 0))
-    private val _calibPort = MutableStateFlow(prefs.getInt(KEY_CALIB_PORT, 0))
-    private val _calibStbd = MutableStateFlow(prefs.getInt(KEY_CALIB_STBD, 0))
-
     /**
      * Raw angle derived from magnetometer ellipse calibration.
      */
@@ -225,45 +216,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Rudder percentage specifically derived from magnetometer data.
      */
-    val magRudderPercentage: StateFlow<Float> = combine(
-        magRudderAngle,
-        _magEllipseResult,
-        combine(_calibZero, _calibPort, _calibStbd) { zero, port, stbd -> Triple(zero, port, stbd) },
-        combine(_magCalibZeroDeg, _magCalibPortDeg, _magCalibStbdDeg) { z, p, s -> Triple(z, p, s) },
-        _magY
-    ) { angle, res, legacy, ellipseCal, y ->
-        val (zero, port, stbd) = legacy
-        val (zeroDeg, portDeg, stbdDeg) = ellipseCal
-
-        if (res != null) {
-            fun diffAngle(a: Float, b: Float): Float {
-                var d = a - b
-                while (d > 180) d -= 360f
-                while (d < -180) d += 360f
-                return d
-            }
-            val diff = diffAngle(angle, zeroDeg)
-            val portRange = diffAngle(portDeg, zeroDeg)
-            val stbdRange = diffAngle(stbdDeg, zeroDeg)
-            val pos = when {
-                abs(portRange) > 1 && (diff / portRange) > 0 -> (diff / portRange) * -100f
-                abs(stbdRange) > 1 && (diff / stbdRange) > 0 -> (diff / stbdRange) * 100f
-                else -> 0f
-            }
-            pos.coerceIn(-100f, 100f)
-        } else {
-            val diff = (y - zero).toFloat()
-            if (abs(diff) < 1f) return@combine 0f
-            val portRange = (port - zero).toFloat()
-            val stbdRange = (stbd - zero).toFloat()
-            val pos = when {
-                abs(portRange) > 10 && (diff / portRange) > 0 -> (diff / portRange) * -100f
-                abs(stbdRange) > 10 && (diff / stbdRange) > 0 -> (diff / stbdRange) * 100f
-                else -> 0f
-            }
-            pos.coerceIn(-100f, 100f)
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
+    val magRudderPercentage: StateFlow<Float> = steerSensorAngle
 
     /**
      * High-level rudder position flow for the main application UI.
@@ -332,6 +285,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         loadSensorFusionOffsets()
+        loadSteerCalib()
         setupSync()
         setupMagnetometer()
         setupQmc6308()
@@ -348,6 +302,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         sensorFusion.gyroBiasX = prefs.getFloat(KEY_SF_GYRO_BIAS_X, 0f)
         sensorFusion.gyroBiasY = prefs.getFloat(KEY_SF_GYRO_BIAS_Y, 0f)
         sensorFusion.gyroBiasZ = prefs.getFloat(KEY_SF_GYRO_BIAS_Z, 0f)
+    }
+
+    private fun loadSteerCalib() {
+        val data = prefs.getString(KEY_CALIB_POINTS, null)
+        if (data != null) {
+            try {
+                steerProcessor.clearCalibrationPoints()
+                data.split(";").filter { it.isNotBlank() }.forEach { entry ->
+                    val pts = entry.split(",")
+                    if (pts.size == 3) {
+                        steerProcessor.addCalibrationPoint(pts[0].toFloat(), pts[1].toFloat(), pts[2].toFloat())
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load steer calib", e)
+            }
+        }
     }
 
     private fun setupSync() {
@@ -376,6 +347,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val xU = (x.toInt() and 0xFFFF); val yU = (y.toInt() and 0xFFFF); val zU = (z.toInt() and 0xFFFF)
                     _magX.value = xU - 524288; _magY.value = yU - 524288; _magZ.value = zU - 524288
                     if (_isMagCalibrating.value) magCalibrator.addSample(_magX.value.toFloat(), _magY.value.toFloat())
+                    _steerSensorAngle.value = steerProcessor.calculateAngle(_magX.value, _magY.value)
                 }
             }
         }
@@ -395,6 +367,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     lx = data.x.toFloat(); ly = data.y.toFloat(); lz = data.z.toFloat()
                 }
                 if (_isMagCalibrating.value) magCalibrator.addSample(_magX.value.toFloat(), _magY.value.toFloat())
+                _steerSensorAngle.value = steerProcessor.calculateAngle(_magX.value, _magY.value)
             }
         }
     }
@@ -403,7 +376,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             motorManager.steerSensorData.collect { data ->
                 _steerSensorA.value = data.sensorA; _steerSensorB.value = data.sensorB
-                _steerSensorAngle.value = steerProcessor.calculateAngle(data.sensorA, data.sensorB)
+                // _steerSensorAngle.value = steerProcessor.calculateAngle(data.sensorA, data.sensorB)
             }
         }
     }
@@ -704,9 +677,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         saveSteerCalib()
     }
 
+    fun addSteerCalibPoint(percentage: Float) {
+        steerProcessor.addCalibrationPoint(percentage, _magX.value.toFloat(), _magY.value.toFloat())
+        saveSteerCalib()
+    }
+
+    fun clearSteerCalib() {
+        steerProcessor.clearCalibrationPoints()
+        prefs.edit().remove(KEY_CALIB_POINTS).apply()
+    }
+
     private fun saveSteerCalib() {
-        prefs.edit().putInt(KEY_CALIB_ZERO, steerProcessor.zeroX).putInt(KEY_CALIB_PORT, steerProcessor.portX).putInt(KEY_CALIB_STBD, steerProcessor.stbdX).apply()
-        _calibZero.value = steerProcessor.zeroX; _calibPort.value = steerProcessor.portX; _calibStbd.value = steerProcessor.stbdX
+        val points = steerProcessor.getCalibrationPoints()
+        val data = points.joinToString(";") { "${it.first},${it.second},${it.third}" }
+        prefs.edit().putString(KEY_CALIB_POINTS, data).apply()
     }
 
     fun startMagEllipseCalib() { magCalibrator.clear(); _isMagCalibrating.value = true }
