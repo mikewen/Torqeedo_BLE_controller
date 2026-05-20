@@ -1,9 +1,7 @@
 package com.torqeedo.controller.protocol
 
 import android.util.Log
-import kotlin.math.abs
-import kotlin.math.sqrt
-import kotlin.math.atan2
+import kotlin.math.*
 
 /**
  * Processor for linear Hall sensor feedback or Magnetometer steering using a 2D Vector Path Interpolation Engine.
@@ -14,7 +12,8 @@ import kotlin.math.atan2
 class SteerSensorProcessor {
     companion object {
         const val DEFAULT_BIAS = 0
-        const val TABLE_SIZE = 128
+        // Using 129 points for a symmetric table from -100 to 100 with a center at 0.
+        const val TABLE_SIZE = 129
         private const val TAG = "SteerSensorProcessor"
 
         // Beta factors for Low Pass Filter (0.0 to 1.0). Lower = more smoothing.
@@ -28,7 +27,17 @@ class SteerSensorProcessor {
     var bias1: Int = DEFAULT_BIAS
     var bias2: Int = DEFAULT_BIAS
 
-    // Calibrated path in ADC/Mag space (relative to BIAS)
+    var useEllipseCorrection: Boolean = false
+        set(value) {
+            field = value
+            rebuildTable()
+        }
+
+    private var ellipseA: Float = 1.0f
+    private var ellipseB: Float = 1.0f
+    private var ellipseTheta: Float = 0.0f
+
+    // Calibrated path in ADC/Mag space
     private val pathA = FloatArray(TABLE_SIZE)
     private val pathB = FloatArray(TABLE_SIZE)
     private val angleTable = FloatArray(TABLE_SIZE)
@@ -39,7 +48,7 @@ class SteerSensorProcessor {
     private var filteredAngle = 0f
     private var firstSample = true
 
-    // Calibration points: Physical Angle -> (A_vector, B_vector)
+    // Calibration points: Physical Angle -> (Raw X, Raw Y)
     private val calibrationPoints = mutableMapOf<Float, Pair<Float, Float>>()
 
     // Backward compatibility helpers for 3-point calibration
@@ -55,12 +64,14 @@ class SteerSensorProcessor {
      * Resets to a default arc mapping.
      */
     fun resetTable() {
+        val center = (TABLE_SIZE - 1) / 2f
+        val steps = (TABLE_SIZE - 1).toFloat()
         for (i in 0 until TABLE_SIZE) {
-            val angle = (i - 64).toFloat() * (200f / 128f)
+            val angle = (i - center) * (200f / steps)
             angleTable[i] = angle
             val rad = Math.toRadians(angle.toDouble())
-            pathA[i] = (Math.sin(rad) * 1000.0).toFloat()
-            pathB[i] = (Math.cos(rad) * 1000.0).toFloat()
+            pathA[i] = (sin(rad) * 1000.0).toFloat()
+            pathB[i] = (cos(rad) * 1000.0).toFloat()
         }
         firstSample = true
     }
@@ -81,7 +92,7 @@ class SteerSensorProcessor {
     }
 
     fun addCalibrationPoint(angle: Float, x: Float, y: Float) {
-        calibrationPoints[angle] = Pair(x - bias1, y - bias2)
+        calibrationPoints[angle] = Pair(x, y)
         rebuildTable()
     }
 
@@ -93,6 +104,23 @@ class SteerSensorProcessor {
     fun setEllipse(cx: Float, cy: Float, a: Float, b: Float, angle: Float) {
         bias1 = cx.toInt()
         bias2 = cy.toInt()
+        ellipseA = if (a > 0f) a else 1.0f
+        ellipseB = if (b > 0f) b else 1.0f
+        ellipseTheta = Math.toRadians(angle.toDouble()).toFloat()
+        rebuildTable()
+    }
+
+    private fun transform(x: Float, y: Float): Pair<Float, Float> {
+        val dx = x - bias1
+        val dy = y - bias2
+        if (!useEllipseCorrection) return Pair(dx, dy)
+        
+        val cosT = cos(ellipseTheta)
+        val sinT = sin(ellipseTheta)
+        // Rotate to align with axes, then scale. Radius normalized to 1000.
+        val curA = ((dx * cosT + dy * sinT) / ellipseA) * 1000f
+        val curB = ((-dx * sinT + dy * cosT) / ellipseB) * 1000f
+        return Pair(curA, curB)
     }
 
     /**
@@ -108,8 +136,7 @@ class SteerSensorProcessor {
             filteredB += LPF_BETA_RAW * (rawB - filteredB)
         }
 
-        val curA = filteredA - bias1
-        val curB = filteredB - bias2
+        val (curA, curB) = transform(filteredA, filteredB)
         
         // Stage 2: Magnitude check
         val mag = sqrt(curA * curA + curB * curB)
@@ -176,39 +203,51 @@ class SteerSensorProcessor {
     }
 
     fun rebuildTable() {
-        if (calibrationPoints.size < 2) return
+        if (calibrationPoints.size < 2) {
+            resetTable()
+            return
+        }
 
         val sorted = calibrationPoints.toList().sortedBy { it.first }
         
+        val center = (TABLE_SIZE - 1) / 2f
+        val steps = (TABLE_SIZE - 1).toFloat()
+        
         for (i in 0 until TABLE_SIZE) {
-            val targetAngle = (i - 64).toFloat() * (200f / 128f)
+            val targetAngle = (i - center) * (200f / steps)
             angleTable[i] = targetAngle
 
-            var p0 = sorted.first()
-            var p1 = sorted.last()
+            var p0raw = sorted.first()
+            var p1raw = sorted.last()
 
-            if (targetAngle <= p0.first) {
-                pathA[i] = p0.second.first
-                pathB[i] = p0.second.second
-            } else if (targetAngle >= p1.first) {
-                pathA[i] = p1.second.first
-                pathB[i] = p1.second.second
+            if (targetAngle <= p0raw.first) {
+                val pt = transform(p0raw.second.first, p0raw.second.second)
+                pathA[i] = pt.first
+                pathB[i] = pt.second
+            } else if (targetAngle >= p1raw.first) {
+                val pt = transform(p1raw.second.first, p1raw.second.second)
+                pathA[i] = pt.first
+                pathB[i] = pt.second
             } else {
                 for (j in 0 until sorted.size - 1) {
                     if (targetAngle >= sorted[j].first && targetAngle <= sorted[j+1].first) {
-                        p0 = sorted[j]
-                        p1 = sorted[j+1]
+                        p0raw = sorted[j]
+                        p1raw = sorted[j+1]
                         break
                     }
                 }
-                val angleDiff = p1.first - p0.first
+                
+                val pt0 = transform(p0raw.second.first, p0raw.second.second)
+                val pt1 = transform(p1raw.second.first, p1raw.second.second)
+
+                val angleDiff = p1raw.first - p0raw.first
                 if (abs(angleDiff) > 1e-6f) {
-                    val t = (targetAngle - p0.first) / angleDiff
-                    pathA[i] = p0.second.first + t * (p1.second.first - p0.second.first)
-                    pathB[i] = p0.second.second + t * (p1.second.second - p0.second.second)
+                    val t = (targetAngle - p0raw.first) / angleDiff
+                    pathA[i] = pt0.first + t * (pt1.first - pt0.first)
+                    pathB[i] = pt0.second + t * (pt1.second - pt0.second)
                 } else {
-                    pathA[i] = p0.second.first
-                    pathB[i] = p0.second.second
+                    pathA[i] = pt0.first
+                    pathB[i] = pt0.second
                 }
             }
         }
@@ -226,15 +265,14 @@ class SteerSensorProcessor {
     }
 
     fun getCalibrationPoints(): List<Triple<Float, Float, Float>> {
-        return calibrationPoints.map { Triple(it.key, it.value.first + bias1, it.value.second + bias2) }
+        return calibrationPoints.map { Triple(it.key, it.value.first, it.value.second) }
     }
     
     /**
      * Returns a raw magnetic angle for display/debug purposes.
      */
     fun getRawMagAngle(x: Int, y: Int): Float {
-        val curA = x - bias1
-        val curB = y - bias2
+        val (curA, curB) = transform(x.toFloat(), y.toFloat())
         return Math.toDegrees(atan2(curB.toDouble(), curA.toDouble())).toFloat()
     }
 
@@ -242,9 +280,8 @@ class SteerSensorProcessor {
     fun getPathB(): FloatArray = pathB.copyOf()
     
     fun getRatio(rawA: Int, rawB: Int): Float {
-        val a = rawA - bias1
-        val b = rawB - bias2
-        val denom = if (abs(b.toFloat()) < 1.0f) (if (b < 0) -1.0f else 1.0f) else b.toFloat()
-        return a.toFloat() / denom
+        val (a, b) = transform(rawA.toFloat(), rawB.toFloat())
+        val denom = if (abs(b) < 1.0f) (if (b < 0) -1.0f else 1.0f) else b
+        return a / denom
     }
 }

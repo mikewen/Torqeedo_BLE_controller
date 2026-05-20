@@ -51,7 +51,8 @@ volatile uint32_t motorStopTime = 0;
 // Filter & Averaging Globals
 // =====================================================
 // Exponential smoothing coefficient (0..1). Lower = more smoothing.
-#define LPF_ALPHA 0.35f
+//#define LPF_ALPHA 0.35f
+#define LPF_ALPHA 1.0f
 static float filteredX = 0, filteredY = 0, filteredZ = 0;
 static bool firstFilter = true;
 
