@@ -2,7 +2,6 @@ package com.torqeedo.controller.ui
 
 import android.annotation.SuppressLint
 import android.os.Bundle
-import android.view.MotionEvent
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Lifecycle
@@ -12,6 +11,7 @@ import com.google.android.material.snackbar.Snackbar
 import com.torqeedo.controller.databinding.ActivityCalibrationBinding
 import com.torqeedo.controller.viewmodel.MainViewModel
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 class CalibrationActivity : AppCompatActivity() {
@@ -148,8 +148,10 @@ class CalibrationActivity : AppCompatActivity() {
                     vm.magZ.collectLatest { z -> binding.tvMagZ.text = "Z: $z" }
                 }
                 launch {
-                    vm.rudderPosition.collectLatest { pos ->
-                        binding.tvRudderPos.text = "Rudder: %.1f%%".format(pos)
+                    combine(vm.magRudderAngle, vm.magRudderPercentage) { angle, percent ->
+                        "Angle: %.1f° (%.1f%%)".format(angle, percent)
+                    }.collectLatest { text ->
+                        binding.tvRudderPos.text = text
                     }
                 }
                 launch {

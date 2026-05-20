@@ -62,20 +62,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_MAG_CALIB_PORT_DEG = "mag_calib_port_deg"
         private const val KEY_MAG_CALIB_STBD_DEG = "mag_calib_stbd_deg"
 
-        private const val KEY_VEC_A_CENTER = "vec_a_center"
-        private const val KEY_VEC_B_CENTER = "vec_b_center"
-        private const val KEY_VEC_A_PORT22 = "vec_a_port22"
-        private const val KEY_VEC_B_PORT22 = "vec_b_port22"
-        private const val KEY_VEC_A_PORT35 = "vec_a_port35"
-        private const val KEY_VEC_B_PORT35 = "vec_b_port35"
-        private const val KEY_VEC_A_STBD22 = "vec_a_stbd22"
-        private const val KEY_VEC_B_STBD22 = "vec_b_stbd22"
-        private const val KEY_VEC_A_STBD35 = "vec_a_stbd35"
-        private const val KEY_VEC_B_STBD35 = "vec_b_stbd35"
-
-        private const val KEY_STEER_LUT_A = "steer_lut_a"
-        private const val KEY_STEER_LUT_B = "steer_lut_b"
-
         private const val KEY_AP_KP = "ap_kp"
         private const val KEY_AP_KI = "ap_ki"
         private const val KEY_AP_KD = "ap_kd"
@@ -131,9 +117,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _qmcLpfEnabled = MutableStateFlow(prefs.getBoolean(KEY_QMC_LPF, false))
     val qmcLpfEnabled: StateFlow<Boolean> = _qmcLpfEnabled.asStateFlow()
 
-    private val bluetoothAdapter: BluetoothAdapter =
-        (application.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
+    // --- Bluetooth ---
+    private val bluetoothManager: BluetoothManager = application.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+    private val bluetoothAdapter: BluetoothAdapter = bluetoothManager.adapter
 
+    // --- BLE Managers ---
     val motorManager = BleRepository.getMotorManager(application)
     val imuManager   = BleRepository.getImuManager(application)
     val gpsManager   = BleRepository.getGpsManager(application)
@@ -143,9 +131,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val motorConnectionState: StateFlow<TorqeedoBleManager.ConnectionState> = motorManager.connectionState
     val imuConnectionState:   StateFlow<TorqeedoBleManager.ConnectionState> = imuManager.connectionState
     val gpsConnectionState:   StateFlow<TorqeedoBleManager.ConnectionState> = gpsManager.connectionState
-
     val remoteConnected: StateFlow<Boolean> = BleRepository.remoteConnected.asStateFlow()
-
     val scanResults: StateFlow<List<DiscoveredDevice>> = scanner.devices
     val isScanning:  StateFlow<Boolean> = scanner.isScanning
 
@@ -222,23 +208,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         heading
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
 
-
     private val _calibZero = MutableStateFlow(prefs.getInt(KEY_CALIB_ZERO, 0))
     private val _calibPort = MutableStateFlow(prefs.getInt(KEY_CALIB_PORT, 0))
     private val _calibStbd = MutableStateFlow(prefs.getInt(KEY_CALIB_STBD, 0))
 
-    val rudderPosition: StateFlow<Float> = combine(
-        combine(_magX, _magY, _magEllipseResult) { x, y, res -> Triple(x, y, res) },
+    /**
+     * Raw angle derived from magnetometer ellipse calibration.
+     */
+    val magRudderAngle: StateFlow<Float> = combine(_magX, _magY, _magEllipseResult) { x, y, res ->
+        if (res != null) {
+            val norm = magCalibrator.normalize(x.toFloat(), y.toFloat(), res)
+            Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
+        } else 0f
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
+
+    /**
+     * Rudder percentage specifically derived from magnetometer data.
+     */
+    val magRudderPercentage: StateFlow<Float> = combine(
+        magRudderAngle,
+        _magEllipseResult,
         combine(_calibZero, _calibPort, _calibStbd) { zero, port, stbd -> Triple(zero, port, stbd) },
-        combine(_magCalibZeroDeg, _magCalibPortDeg, _magCalibStbdDeg) { z, p, s -> Triple(z, p, s) }
-    ) { mag, legacy, ellipseCal ->
-        val (x, y, res) = mag
+        combine(_magCalibZeroDeg, _magCalibPortDeg, _magCalibStbdDeg) { z, p, s -> Triple(z, p, s) },
+        _magY
+    ) { angle, res, legacy, ellipseCal, y ->
         val (zero, port, stbd) = legacy
         val (zeroDeg, portDeg, stbdDeg) = ellipseCal
 
         if (res != null) {
-            val norm = magCalibrator.normalize(x.toFloat(), y.toFloat(), res)
-            val angle = Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
             fun diffAngle(a: Float, b: Float): Float {
                 var d = a - b
                 while (d > 180) d -= 360f
@@ -268,6 +265,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
 
+    /**
+     * High-level rudder position flow for the main application UI.
+     */
+    val rudderPosition: StateFlow<Float> = magRudderPercentage
+
     // --- GPS State ---
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(application)
     private val _gpsFix = MutableStateFlow(false)
@@ -276,10 +278,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val gpsSpeedKnots: StateFlow<Float> = _gpsSpeedKnots.asStateFlow()
     private val _gpsCourse = MutableStateFlow<Int?>(null)
     val gpsCourse: StateFlow<Int?> = _gpsCourse.asStateFlow()
-
     private val _rawBleGpsFrame = MutableStateFlow<ByteArray?>(null)
     val rawBleGpsFrame: StateFlow<ByteArray?> = _rawBleGpsFrame.asStateFlow()
-
     private val _parsedBleGps = MutableStateFlow<String>("No Data")
     val parsedBleGps: StateFlow<String> = _parsedBleGps.asStateFlow()
 
@@ -433,10 +433,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Convert NMEA coordinate format (DDMM.MMMM) to decimal degrees.
-     * Input is the NMEA value already divided by 10000 (i.e. rawLat = DDMM.MMMM as float).
-     */
     private fun convertNmeaToDecimal(nmea: Float): Double {
         val degrees = (nmea / 100).toInt()
         val minutes = nmea - degrees * 100f
@@ -494,7 +490,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             _IMUPitch.value = state.pitchDeg
             _IMURoll.value = state.rollDeg
-
             if (state.hasFix) {
                 BleRepository.setCurrentLocation(GeoPoint(state.latDeg, state.lonDeg))
                 _gpsSpeedKnots.value = state.speedKnots
@@ -517,30 +512,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val now = System.currentTimeMillis()
                 val dt = if (lastA1Time > 0L) (now - lastA1Time) / 1000f else 0.02f
                 lastA1Time = now
-
-                val ax = readS16LE(frame, 2).toShort()
-                val ay = readS16LE(frame, 4).toShort()
-                val az = readS16LE(frame, 6).toShort()
-                val gx = readS16LE(frame, 8).toShort()
-                val gy = readS16LE(frame, 10).toShort()
-                val gz = readS16LE(frame, 12).toShort()
-                val mx = readS16LE(frame, 14).toShort()
-                val my = readS16LE(frame, 16).toShort()
-                val mz = readS16LE(frame, 18).toShort()
-
+                val ax = readS16LE(frame, 2).toShort(); val ay = readS16LE(frame, 4).toShort(); val az = readS16LE(frame, 6).toShort()
+                val gx = readS16LE(frame, 8).toShort(); val gy = readS16LE(frame, 10).toShort(); val gz = readS16LE(frame, 12).toShort()
+                val mx = readS16LE(frame, 14).toShort(); val my = readS16LE(frame, 16).toShort(); val mz = readS16LE(frame, 18).toShort()
                 _rawImuData.value = RawImuData(ax, ay, az, gx, gy, gz, mx, my, mz)
-
-                if (sensorFusion.isManualCalActive) {
-                    sensorFusion.feedManualMagSample(mx, my)
-                }
-                if (sensorFusion.isGyroBiasCalActive) {
-                    sensorFusion.feedGyroBiasSample(gx, gy, gz)
-                }
-
-                // Apply SensorFusion processing
-                sensorFusion.processA1(ax, ay, az, gx, gy, gz, mx, my, mz, now, accelRotated180 = false)
-
-                // Continuous integration for verification in UI
+                if (sensorFusion.isManualCalActive) sensorFusion.feedManualMagSample(mx, my)
+                if (sensorFusion.isGyroBiasCalActive) sensorFusion.feedGyroBiasSample(gx, gy, gz)
+                sensorFusion.processA1(ax, ay, az, gx, gy, gz, mx, my, mz, now, false)
                 _calibDegreesTurned.value += sensorFusion.getState().gyroZDegS * dt
             }
         }
@@ -558,7 +536,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 sensorFusion.processA2(hdg, pitch, roll, acc, base, qual, sats, System.currentTimeMillis())
             }
         }
-
         viewModelScope.launch { imuManager.imuA1Data.collect { processA1(it) } }
         //viewModelScope.launch { motorManager.imuA1Data.collect { processA1(it) } }
         viewModelScope.launch { gpsManager.imuA1Data.collect { processA1(it) } }
@@ -578,9 +555,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }.collectLatest { to ->
                 if (to != null) {
                     val co = _headingOffset.value
-                    var diff = to - co
-                    while (diff > 180f) diff -= 360f
-                    while (diff < -180f) diff += 360f
+                    var diff = to - co; while (diff > 180f) diff -= 360f; while (diff < -180f) diff += 360f
                     val no = co + (diff * 0.001f)
                     if (abs(no - co) > 0.0001f) { _headingOffset.value = no; prefs.edit().putFloat(KEY_HEADING_OFFSET, no).apply() }
                 }
@@ -590,14 +565,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- Control Methods (Delegated to Repository) ---
     fun setDirection(dir: Direction) = BleRepository.setDirection(dir)
-    fun increaseSpeed() {
-        BleRepository.increaseSpeed()
-        BleRepository.speakThrottle()
-    }
-    fun decreaseSpeed() {
-        BleRepository.decreaseSpeed()
-        BleRepository.speakThrottle()
-    }
+    fun increaseSpeed() { BleRepository.increaseSpeed(); BleRepository.speakThrottle() }
+    fun decreaseSpeed() { BleRepository.decreaseSpeed(); BleRepository.speakThrottle() }
     fun stopMotor() = BleRepository.stopMotor()
     fun startAutoIncrease(multiplier: Int = 1) = BleRepository.startAutoIncrease(multiplier)
     fun startAutoDecrease(multiplier: Int = 1) = BleRepository.startAutoDecrease(multiplier)
@@ -644,17 +613,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         override fun onLocationResult(res: LocationResult) {
             // Prefer BLE GPS (0xA3) if it was updated in the last 10 seconds
             if (System.currentTimeMillis() - lastBleGpsUpdate < 10000) return
-            
             val loc = res.lastLocation ?: return
-            _gpsFix.value = true
-            _gpsSpeedKnots.value = loc.speed * 1.94384f
+            _gpsFix.value = true; _gpsSpeedKnots.value = loc.speed * 1.94384f
             _gpsCourse.value = if (loc.hasBearing()) loc.bearing.toInt() else null
             BleRepository.setCurrentLocation(GeoPoint(loc.latitude, loc.longitude))
-            motorManager.updateGpsInfo(loc.latitude, loc.longitude, _gpsSpeedKnots.value.toFloat(), _gpsCourse.value)
+            motorManager.updateGpsInfo(loc.latitude, loc.longitude, _gpsSpeedKnots.value, _gpsCourse.value)
             val d = GeomagneticField(loc.latitude.toFloat(), loc.longitude.toFloat(), loc.altitude.toFloat(), System.currentTimeMillis()).declination
             if (abs(_declination.value - d) > 0.1f) {
                 _declination.value = d
-                prefs.edit().putFloat(KEY_DECLINATION, d).apply() 
+                prefs.edit().putFloat(KEY_DECLINATION, d).apply()
                 sensorFusion.setDeclination(d)
             }
         }
@@ -662,11 +629,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stopGpsUpdates() { fusedLocationClient.removeLocationUpdates(locationCallback); _gpsFix.value = false }
     fun startScan() = scanner.startScan(_scanAllNames.value)
-    fun startRemoteScan() = scanner.startRemoteScan(); fun startImuScan() = scanner.startImuScan(); fun startGpsScan() = scanner.startGpsScan();
+    fun startRemoteScan() = scanner.startRemoteScan(); fun startImuScan() = scanner.startImuScan(); fun startGpsScan() = scanner.startGpsScan()
     fun stopScan() = scanner.stopScan(); fun setScanAllNames(all: Boolean) { _scanAllNames.value = all }
-
-
-// In MainViewModel.kt
 
     fun connect(disc: DiscoveredDevice) {
         viewModelScope.launch {
@@ -705,15 +669,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun disconnect() { motorManager.disconnectDevice(); imuManager.disconnectDevice(); gpsManager.disconnectDevice() }
-
     fun speak(text: String) = BleRepository.speak(text)
 
-    fun calibrateZero() { steerProcessor.calibrateZero(_magX.value, _magY.value); saveSteerCalib() }
-    fun calibratePort() { steerProcessor.calibratePort(_magX.value, _magY.value); saveSteerCalib() }
-    fun calibrateStbd() { steerProcessor.calibrateStbd(_magX.value, _magY.value); saveSteerCalib() }
+    fun calibrateZero() {
+        steerProcessor.calibrateZero(_magX.value, _magY.value)
+        _magEllipseResult.value?.let { res ->
+            val norm = magCalibrator.normalize(_magX.value.toFloat(), _magY.value.toFloat(), res)
+            val deg = Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
+            _magCalibZeroDeg.value = deg
+            prefs.edit().putFloat(KEY_MAG_CALIB_ZERO_DEG, deg).apply()
+        }
+        saveSteerCalib()
+    }
+
+    fun calibratePort() {
+        steerProcessor.calibratePort(_magX.value, _magY.value)
+        _magEllipseResult.value?.let { res ->
+            val norm = magCalibrator.normalize(_magX.value.toFloat(), _magY.value.toFloat(), res)
+            val deg = Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
+            _magCalibPortDeg.value = deg
+            prefs.edit().putFloat(KEY_MAG_CALIB_PORT_DEG, deg).apply()
+        }
+        saveSteerCalib()
+    }
+
+    fun calibrateStbd() {
+        steerProcessor.calibrateStbd(_magX.value, _magY.value)
+        _magEllipseResult.value?.let { res ->
+            val norm = magCalibrator.normalize(_magX.value.toFloat(), _magY.value.toFloat(), res)
+            val deg = Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
+            _magCalibStbdDeg.value = deg
+            prefs.edit().putFloat(KEY_MAG_CALIB_STBD_DEG, deg).apply()
+        }
+        saveSteerCalib()
+    }
 
     private fun saveSteerCalib() {
         prefs.edit().putInt(KEY_CALIB_ZERO, steerProcessor.zeroX).putInt(KEY_CALIB_PORT, steerProcessor.portX).putInt(KEY_CALIB_STBD, steerProcessor.stbdX).apply()
+        _calibZero.value = steerProcessor.zeroX; _calibPort.value = steerProcessor.portX; _calibStbd.value = steerProcessor.stbdX
     }
 
     fun startMagEllipseCalib() { magCalibrator.clear(); _isMagCalibrating.value = true }
@@ -765,7 +758,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _sfGyroCalStatus.value = "Starting..."
         speak("Gyro calibration started. Keep the boat steady.")
     }
-
     fun stopSFusionGyroCal() {
         if (sensorFusion.finishGyroBiasCal()) {
             _isSFusionGyroCalibrating.value = false

@@ -40,7 +40,8 @@ class MagEllipseCalibrator {
         if (samples.size < 6) return null
 
         // We want to solve M * K = Y
-        // where K = [A, B, C, D, E]^T
+        // where K = [C, B, D, E, F]^T  (matching coefficients below)
+        // normalized equation: x^2 + Bxy + Cy^2 + Dx + Ey + F = 0
         // row of M = [y^2, x*y, x, y, 1]
         // row of Y = -x^2
 
@@ -69,7 +70,7 @@ class MagEllipseCalibrator {
         val k = solve(mMat, yVec) ?: return null
 
         // Coefficients: Ax^2 + Bxy + Cy^2 + Dx + Ey + F = 0
-        // Our normalization was x^2 + k[0]y^2 + k[1]xy + k[2]x + k[3]y + k[4] = 0
+        // Our normalization was x^2 + k[1]xy + k[0]y^2 + k[2]x + k[3]y + k[4] = 0
         val coeffA = 1.0
         val coeffB = k[1]
         val coeffC = k[0]
@@ -78,6 +79,9 @@ class MagEllipseCalibrator {
         val coeffF = k[4]
 
         // Center calculation
+        // Solve:
+        // 2Ax + By + D = 0
+        // Bx + 2Cy + E = 0
         val denom = coeffB * coeffB - 4 * coeffA * coeffC
         if (abs(denom) < 1e-10) return null
 
@@ -87,24 +91,37 @@ class MagEllipseCalibrator {
         // Remove translation to center to find axes and rotation
         val fPrime = coeffA * cx * cx + coeffB * cx * cy + coeffC * cy * cy + coeffD * cx + coeffE * cy + coeffF
 
-        // Eigenvalues of [[A, B/2], [B/2, C]]
-        val term1 = coeffA + coeffC
-        val term2 = sqrt((coeffA - coeffC) * (coeffA - coeffC) + coeffB * coeffB)
-        val lambda1 = (term1 + term2) / 2.0
-        val lambda2 = (term1 - term2) / 2.0
-
-        if (fPrime >= 0) return null 
-
-        val axis1 = sqrt(-fPrime / lambda1)
-        val axis2 = sqrt(-fPrime / lambda2)
-        
+        // Angle of rotation (angle of the axis we'll call axisA)
         val angle = if (abs(coeffB) < 1e-10) {
             if (coeffA < coeffC) 0.0 else PI / 2.0
         } else {
             0.5 * atan2(coeffB, coeffA - coeffC)
         }
 
-        return Result(cx.toFloat(), cy.toFloat(), axis1.toFloat(), axis2.toFloat(), angle.toFloat())
+        // Eigenvalues for the aligned axes
+        // lambda = A cos^2(theta) + B sin(theta)cos(theta) + C sin^2(theta)
+        val cosA = cos(angle)
+        val sinA = sin(angle)
+        val lambdaA = coeffA * cosA * cosA + coeffB * sinA * cosA + coeffC * sinA * sinA
+        
+        // The other axis is at angle + PI/2
+        val cosB = cos(angle + PI / 2.0)
+        val sinB = sin(angle + PI / 2.0)
+        val lambdaB = coeffA * cosB * cosB + coeffB * sinB * cosB + coeffC * sinB * sinB
+
+        if (fPrime >= 0) {
+            // This can happen if the fit results in a hyperbola or the center is not contained.
+            // However, we might just have the sign of the whole equation flipped.
+            // In algebraic fitting, we usually want fPrime to be negative so that lambda*axis^2 = -fPrime > 0.
+            return null
+        }
+
+        if (lambdaA <= 0 || lambdaB <= 0) return null // Not an ellipse
+
+        val axisA = sqrt(-fPrime / lambdaA)
+        val axisB = sqrt(-fPrime / lambdaB)
+        
+        return Result(cx.toFloat(), cy.toFloat(), axisA.toFloat(), axisB.toFloat(), angle.toFloat())
     }
 
     private fun solve(matrix: Array<DoubleArray>, rhs: DoubleArray): DoubleArray? {
@@ -152,12 +169,14 @@ class MagEllipseCalibrator {
         val ty = y.toDouble() - res.centerY
         
         // 2. Rotate to align with axes
+        // To un-rotate the point, we rotate by -angle
         val cosA = cos(-res.angle.toDouble())
         val sinA = sin(-res.angle.toDouble())
         val rx = tx * cosA - ty * sinA
         val ry = tx * sinA + ty * cosA
         
         // 3. Scale to unit circle
+        // rx is aligned with the axis at res.angle, which has length res.axisA
         val nx = rx / res.axisA
         val ny = ry / res.axisB
         
