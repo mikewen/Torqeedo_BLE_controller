@@ -3,6 +3,7 @@ package com.torqeedo.controller.protocol
 import android.util.Log
 import kotlin.math.abs
 import kotlin.math.sqrt
+import kotlin.math.atan2
 
 /**
  * Processor for linear Hall sensor feedback or Magnetometer steering using a 2D Vector Path Interpolation Engine.
@@ -17,8 +18,8 @@ class SteerSensorProcessor {
         private const val TAG = "SteerSensorProcessor"
 
         // Beta factors for Low Pass Filter (0.0 to 1.0). Lower = more smoothing.
-        private const val LPF_BETA_RAW = 0.05f
-        private const val LPF_BETA_ANGLE = 0.1f
+        private const val LPF_BETA_RAW = 1.0f      // No filtering, firmware already does this
+        private const val LPF_BETA_ANGLE = 1.0f      // No filtering
         
         // Minimum signal magnitude sqrt(X^2 + Y^2) to trust the sensor reading.
         const val MIN_MAGNITUDE = 10f 
@@ -68,10 +69,12 @@ class SteerSensorProcessor {
         zeroX = x; zeroY = y 
         addCalibrationPoint(0f, x.toFloat(), y.toFloat())
     }
+    
     fun calibratePort(x: Int, y: Int) { 
         portX = x; portY = y 
         addCalibrationPoint(-100f, x.toFloat(), y.toFloat())
     }
+    
     fun calibrateStbd(x: Int, y: Int) { 
         stbdX = x; stbdY = y 
         addCalibrationPoint(100f, x.toFloat(), y.toFloat())
@@ -90,12 +93,10 @@ class SteerSensorProcessor {
     fun setEllipse(cx: Float, cy: Float, a: Float, b: Float, angle: Float) {
         bias1 = cx.toInt()
         bias2 = cy.toInt()
-        // Re-adjust all calibration points relative to new bias
-        // (In a real scenario, we might want to store raw points and subtract bias during rebuild)
     }
 
     /**
-     * Calculates the steering angle from raw sensor inputs.
+     * Calculates the steering angle (percentage) from raw sensor inputs.
      */
     fun calculateAngle(rawA: Int, rawB: Int): Float {
         // Stage 1: Filter raw inputs
@@ -112,10 +113,11 @@ class SteerSensorProcessor {
         
         // Stage 2: Magnitude check
         val mag = sqrt(curA * curA + curB * curB)
+        /*
         if (mag < MIN_MAGNITUDE) {
             return filteredAngle 
         }
-
+        */
         val rawAngle = findAngleOnPath(curA, curB)
 
         // Stage 3: Angle Smoothing
@@ -225,6 +227,15 @@ class SteerSensorProcessor {
 
     fun getCalibrationPoints(): List<Triple<Float, Float, Float>> {
         return calibrationPoints.map { Triple(it.key, it.value.first + bias1, it.value.second + bias2) }
+    }
+    
+    /**
+     * Returns a raw magnetic angle for display/debug purposes.
+     */
+    fun getRawMagAngle(x: Int, y: Int): Float {
+        val curA = x - bias1
+        val curB = y - bias2
+        return Math.toDegrees(atan2(curB.toDouble(), curA.toDouble())).toFloat()
     }
 
     fun getPathA(): FloatArray = pathA.copyOf()

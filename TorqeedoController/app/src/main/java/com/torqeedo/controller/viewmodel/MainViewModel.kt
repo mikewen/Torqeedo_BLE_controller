@@ -218,6 +218,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     val magRudderPercentage: StateFlow<Float> = steerSensorAngle
 
+    private val _rawMagAngle = MutableStateFlow(0f)
+    val rawMagAngle: StateFlow<Float> = _rawMagAngle.asStateFlow()
     /**
      * High-level rudder position flow for the main application UI.
      */
@@ -368,6 +370,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 if (_isMagCalibrating.value) magCalibrator.addSample(_magX.value.toFloat(), _magY.value.toFloat())
                 _steerSensorAngle.value = steerProcessor.calculateAngle(_magX.value, _magY.value)
+                //getRawMagAngle
+                //_steerSensorAngle.value = steerProcessor.getRawMagAngle(_magX.value, _magY.value)
+                val rawAngle = Math.toDegrees(atan2(_magY.value.toDouble(), _magX.value.toDouble())).toFloat()
+                _rawMagAngle.value = rawAngle
             }
         }
     }

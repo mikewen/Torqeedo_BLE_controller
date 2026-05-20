@@ -165,9 +165,9 @@ class CalibrationActivity : AppCompatActivity() {
                 launch {
                     vm.magZ.collectLatest { z -> binding.tvMagZ.text = "Z: $z" }
                 }
-                launch {
-                    combine(vm.magRudderAngle, vm.magRudderPercentage) { angle, percent ->
-                        "Angle: %.1f° (%.1f%%)".format(angle, percent)
+                launch {    //steerSensorAngle
+                    //combine(vm.magRudderAngle, vm.magRudderPercentage) { angle, percent -> "Angle: %.1f° (%.1f%%)".format(angle, percent)
+                    combine(vm.rawMagAngle, vm.magRudderPercentage) { angle, percent -> "Angle: %.1f° (%.1f%%)".format(angle, percent)
                     }.collectLatest { text ->
                         binding.tvRudderPos.text = text
                     }
