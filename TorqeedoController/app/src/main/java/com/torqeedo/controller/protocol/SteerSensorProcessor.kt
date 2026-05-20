@@ -22,7 +22,7 @@ class SteerSensorProcessor {
         private const val LPF_BETA_ANGLE = 1.0f      // No filtering
         
         // Minimum signal magnitude sqrt(X^2 + Y^2) to trust the sensor reading.
-        const val MIN_MAGNITUDE = 10f 
+        const val MIN_MAGNITUDE = 5f
     }
 
     var bias1: Int = DEFAULT_BIAS
@@ -113,11 +113,11 @@ class SteerSensorProcessor {
         
         // Stage 2: Magnitude check
         val mag = sqrt(curA * curA + curB * curB)
-        /*
+
         if (mag < MIN_MAGNITUDE) {
             return filteredAngle 
         }
-        */
+
         val rawAngle = findAngleOnPath(curA, curB)
 
         // Stage 3: Angle Smoothing

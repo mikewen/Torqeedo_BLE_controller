@@ -289,7 +289,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         loadSensorFusionOffsets()
         loadSteerCalib()
         setupSync()
-        setupMagnetometer()
+        //setupMagnetometer()
         setupQmc6308()
         setupSteerSensor()
         setupIMU()
