@@ -14,8 +14,13 @@ object TorqeedoProtocol {
     const val HEADER: Byte = 0xAC.toByte()
     const val FOOTER: Byte = 0xAD.toByte()
 
-    const val MOTOR_ADDR: Byte = 0x30.toByte()
-    const val STEER_ADDR: Byte = 0x38.toByte()
+    const val MASTER_ADDR: Byte  = 0x00.toByte()
+    const val REMOTE_ADDR: Byte  = 0x01.toByte()
+    const val REMOTE1_ADDR: Byte = 0x14.toByte()
+    const val DISPLAY_ADDR: Byte = 0x20.toByte()
+    const val MOTOR_ADDR: Byte   = 0x30.toByte()
+    const val STEER_ADDR: Byte   = 0x38.toByte()
+    const val BATTERY_ADDR: Byte = 0x80.toByte()
     
     const val MSGID_DRIVE: Byte = 0x82.toByte()
     const val MSGID_STATUS: Byte = 0x83.toByte() // Status query message ID
@@ -175,7 +180,10 @@ object TorqeedoProtocol {
         val powerW: Int = 0,
         val tempC: Int = 0,
         val errorCode: Int = 0,
-        val rawBytes: ByteArray = byteArrayOf()
+        val rawBytes: ByteArray = byteArrayOf(),
+        val targetSpeed: Int? = null,
+        val destAddr: Byte? = null,
+        val msgId: Byte? = null
     ) {
         val hasError: Boolean get() = errorCode != 0
         val errorDescription: String get() = errorDescription(errorCode)
@@ -191,6 +199,9 @@ object TorqeedoProtocol {
             if (tempC != other.tempC) return false
             if (errorCode != other.errorCode) return false
             if (!rawBytes.contentEquals(other.rawBytes)) return false
+            if (targetSpeed != other.targetSpeed) return false
+            if (destAddr != other.destAddr) return false
+            if (msgId != other.msgId) return false
             return true
         }
 
@@ -202,6 +213,9 @@ object TorqeedoProtocol {
             result = 31 * result + tempC
             result = 31 * result + errorCode
             result = 31 * result + rawBytes.contentHashCode()
+            result = 31 * result + (targetSpeed ?: 0)
+            result = 31 * result + (destAddr?.toInt() ?: 0)
+            result = 31 * result + (msgId?.toInt() ?: 0)
             return result
         }
     }
@@ -215,6 +229,9 @@ object TorqeedoProtocol {
         private var current: Float? = null
         private var tempC: Int? = null
         private var errorCode: Int? = null
+        private var targetSpeed: Int? = null
+        private var lastDestAddr: Byte? = null
+        private var lastMsgId: Byte? = null
         private var rawBytesList = mutableListOf<ByteArray>()
 
         // Track first receipt of each field
@@ -230,6 +247,11 @@ object TorqeedoProtocol {
         fun update(frame: ByteArray) {
             val status = parseFrame(frame) ?: return
             lastUpdate = System.currentTimeMillis()
+
+            if (status.destAddr != null) {
+                lastDestAddr = status.destAddr
+                lastMsgId = status.msgId
+            }
 
             // Update ALL values (including zeros) on first receipt
             if (!rpmReceived || status.rpm != 0) {
@@ -252,12 +274,15 @@ object TorqeedoProtocol {
                 errorCode = status.errorCode
                 errorReceived = true
             }
+            if (status.targetSpeed != null) {
+                targetSpeed = status.targetSpeed
+            }
             if (status.rawBytes.isNotEmpty()) rawBytesList.add(status.rawBytes)
         }
 
         fun build(): MotorStatus? {
             if (!rpmReceived && !voltageReceived && !currentReceived &&
-                !tempReceived && !errorReceived)
+                !tempReceived && !errorReceived && targetSpeed == null && lastDestAddr == null)
                 return null
 
             val v = voltage ?: 0f
@@ -272,7 +297,10 @@ object TorqeedoProtocol {
                 powerW = power,
                 tempC = tempC ?: 0,
                 errorCode = errorCode ?: 0,
-                rawBytes = combinedRaw
+                rawBytes = combinedRaw,
+                targetSpeed = targetSpeed,
+                destAddr = lastDestAddr,
+                msgId = lastMsgId
             )
         }
 
@@ -281,7 +309,8 @@ object TorqeedoProtocol {
 
         fun clear() {
             rpm = null; voltage = null; current = null
-            tempC = null; errorCode = null
+            tempC = null; errorCode = null; targetSpeed = null
+            lastDestAddr = null; lastMsgId = null
             rpmReceived = false; voltageReceived = false
             currentReceived = false; tempReceived = false
             errorReceived = false
@@ -380,6 +409,19 @@ object TorqeedoProtocol {
         // -------- AC ... AD FRAMES (with footer) --------
         if (frame.last() == FOOTER && frame.size >= 5) {
             val addr = frame[1].toInt() and 0xFF
+            val msgId = frame[2].toInt() and 0xFF
+
+            if (msgId == MSGID_DRIVE.toInt() and 0xFF && frame.size >= 9) {
+                val sHi = frame[5].toInt() and 0xFF
+                val sLo = frame[6].toInt() and 0xFF
+                val speed = ((sHi shl 8) or sLo).toShort().toInt()
+                return MotorStatus(targetSpeed = speed, rawBytes = frame, destAddr = addr.toByte(), msgId = msgId.toByte())
+            }
+
+            if (msgId == MSGID_STATUS.toInt() and 0xFF && frame.size >= 5) {
+                return MotorStatus(rawBytes = frame, destAddr = addr.toByte(), msgId = msgId.toByte())
+            }
+
             if (frame.size >= 9 && (addr == 0x30 || addr == 0x38)) {
                 log("0x${addr.toString(16)} frame: ${frame.joinToString(" ") { "%02X".format(it) }}")
 
@@ -388,13 +430,13 @@ object TorqeedoProtocol {
                     val crcRx = frame[7]
                     if (crcRx == crc8Maxim(dataToCrc)) {
                         log("  -> Valid response (CRC ok)")
-                        return MotorStatus(rawBytes = frame)
+                        return MotorStatus(rawBytes = frame, destAddr = addr.toByte(), msgId = msgId.toByte())
                     } else {
                         log("  -> CRC mismatch")
                     }
                 }
             }
-            return parseLegacyStatus(frame)
+            return parseLegacyStatus(frame)?.copy(destAddr = addr.toByte(), msgId = msgId.toByte())
         }
 
         return null
@@ -418,7 +460,7 @@ object TorqeedoProtocol {
             if (payload.size >= 8) tempC = payload[7].toInt() and 0xFF
             if (payload.size >= 9) errorCode = payload[8].toInt() and 0xFF
             log("Legacy status parsed: RPM=$rpm V=$voltage A=$current T=$tempC Err=$errorCode")
-            return MotorStatus(rpm, voltage, current, powerW, tempC, errorCode, raw)
+            return MotorStatus(rpm = rpm, voltage = voltage, current = current, powerW = powerW, tempC = tempC, errorCode = errorCode, rawBytes = raw)
         }
         return null
     }

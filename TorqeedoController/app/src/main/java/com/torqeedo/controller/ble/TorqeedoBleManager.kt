@@ -391,13 +391,13 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         _connectionState.value = ConnectionState.DISCONNECTED
     }
 
-    fun sendDrive(speed: Int) {
+    fun sendDrive(speed: Int, addr: Byte = TorqeedoProtocol.MOTOR_ADDR) {
         //if (ae10Char == null) {
         //    Log.e("BLE_ERROR", "CRITICAL: ae10Char is NULL! Write aborted.")
         //}
 
         val char = ae10Char ?: return
-        val frame = TorqeedoProtocol.buildDrive(speed)
+        val frame = TorqeedoProtocol.buildDrive(addr, speed)
         //Log.d("SEND_DRIVE", "Send data to AE10")
         //Log.d(TAG,"Send_Drive: ${frame.joinToString(" ") { "%02X".format(it) }}")
         logToFile("SEND_DRIVE", frame)
@@ -454,7 +454,7 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         }.enqueue()
     }
 
-//    fun sendWitCalibration(type: Byte) {
+//    fun sendWitCalibrationing(type: Byte) {
 //        val char = ae02Char ?: return
 //        val unlock = byteArrayOf(0xFF.toByte(), 0xAA.toByte(), 0x69.toByte(), 0x88.toByte(), 0xB5.toByte())
 //        val calib = byteArrayOf(0xFF.toByte(), 0xAA.toByte(), 0x01.toByte(), type, 0x00.toByte())

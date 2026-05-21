@@ -41,6 +41,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_SHOW_MOTOR_STATUS = "show_motor_status"
         private const val KEY_REMOTE_MAC = "remote_mac"
         private const val KEY_STEER_SCALE = "steer_scale"
+        private const val KEY_SLAVE_MODE = "slave_mode"
 
         private const val KEY_CALIB_POINTS = "steer_calib_points_v2"
 
@@ -92,6 +93,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val steerValue: StateFlow<Int> = BleRepository.steerValue
     val autoPilotActive: StateFlow<Boolean> = BleRepository.autoPilotActive
     val targetHeading: StateFlow<Float> = BleRepository.targetHeading
+    val slaveMode: StateFlow<Boolean> = BleRepository.slaveMode
 
     // --- Persisted Config Flows ---
     private val _showRawData = MutableStateFlow(prefs.getBoolean(KEY_SHOW_RAW, true))
@@ -111,6 +113,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _qmcLpfEnabled = MutableStateFlow(prefs.getBoolean(KEY_QMC_LPF, false))
     val qmcLpfEnabled: StateFlow<Boolean> = _qmcLpfEnabled.asStateFlow()
+
+    private val _isSlaveMode = MutableStateFlow(prefs.getBoolean(KEY_SLAVE_MODE, false))
+    val isSlaveMode: StateFlow<Boolean> = _isSlaveMode.asStateFlow()
 
     // --- Bluetooth ---
     private val bluetoothManager: BluetoothManager = application.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
@@ -336,6 +341,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         BleRepository.steerScale = _steerScale.value
         BleRepository.enableVoicePrompts = _enableVoicePrompts.value
         BleRepository.showMotorStatus = _showMotorStatus.value
+        BleRepository.slaveMode.value = _isSlaveMode.value
         
         viewModelScope.launch { trueHeading.collect { BleRepository.trueHeading.value = it } }
         viewModelScope.launch { rudderPosition.collect { BleRepository.rudderPosition.value = it } }
@@ -632,6 +638,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setShowMotorStatus(s: Boolean) = prefs.edit().putBoolean(KEY_SHOW_MOTOR_STATUS, s).apply().also { _showMotorStatus.value = s; BleRepository.showMotorStatus = s }
     fun setSteerScale(s: Int) = prefs.edit().putInt(KEY_STEER_SCALE, s).apply().also { _steerScale.value = s; BleRepository.steerScale = s }
     fun setQmcLpfEnabled(e: Boolean) = prefs.edit().putBoolean(KEY_QMC_LPF, e).apply().also { _qmcLpfEnabled.value = e }
+    fun setSlaveMode(s: Boolean) = prefs.edit().putBoolean(KEY_SLAVE_MODE, s).apply().also { _isSlaveMode.value = s; BleRepository.slaveMode.value = s; speak("Slave mode ${if(s) "on" else "off"}") }
 
     fun connectToDevice(address: String) {
         val device = bluetoothAdapter.getRemoteDevice(address)

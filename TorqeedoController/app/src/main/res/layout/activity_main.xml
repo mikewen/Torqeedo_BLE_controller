@@ -76,7 +76,7 @@
         android:paddingVertical="4dp"
         app:layout_constraintTop_toBottomOf="@id/statusBar">
 
-        <!-- Row 1: Raw and Log -->
+        <!-- Row 1: Raw, Log, Slave -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -113,6 +113,23 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:checked="true"
+                app:switchMinWidth="32dp" />
+
+            <View android:layout_width="16dp" android:layout_height="match_parent"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Slave"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:layout_marginEnd="2dp" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/switchSlaveMode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="false"
                 app:switchMinWidth="32dp" />
         </LinearLayout>
 
@@ -297,8 +314,7 @@
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="10dp">
+                    android:orientation="vertical" android:padding="10dp">
 
                     <TextView
                         android:layout_width="wrap_content"

@@ -37,7 +37,6 @@ object BleRepository : TextToSpeech.OnInitListener {
     const val SPEED_MIN = 0
     const val STEER_MAX = 100
     private const val STATUS_QUERY_DELAY = 500L
-    private const val SENSOR_READ_DELAY = 200L
     private const val STEER_REPEAT_DELAY = 80L
     private const val AUTOPILOT_MAX_I = 20f
 
@@ -47,6 +46,7 @@ object BleRepository : TextToSpeech.OnInitListener {
     val steerValue = MutableStateFlow(0)
     val autoPilotActive = MutableStateFlow(false)
     val targetHeading = MutableStateFlow(0f)
+    val slaveMode = MutableStateFlow(false)
     
     val currentSpeed: StateFlow<Int> = combine(direction, speedMagnitude) { dir, mag ->
         if (dir == Direction.FORWARD) mag else -mag
@@ -70,7 +70,7 @@ object BleRepository : TextToSpeech.OnInitListener {
     var apKi = 0.1f
     var apKd = 1.0f
     var apDeadband = 3.0f
-    var maxTurnRate = 25f
+    var maxTurnRate = 12f
     var autoPilotDelay = 200L
     var useRudderSensor = false
     var showMotorStatus = false
@@ -119,10 +119,10 @@ object BleRepository : TextToSpeech.OnInitListener {
     // --- Global Job Management ---
     private var throttleJob: Job? = null
     private var statusQueryJob: Job? = null
-    private var sensorReadJob: Job? = null
     private var autoAdjustmentJob: Job? = null
     private var steerRepeatJob: Job? = null
     private var autoPilotJob: Job? = null
+    private var slaveJob: Job? = null
 
     // --- Navigation State ---
     private val _targetLocation = MutableStateFlow<GeoPoint?>(null)
@@ -176,15 +176,35 @@ object BleRepository : TextToSpeech.OnInitListener {
                 when (state) {
                     TorqeedoBleManager.ConnectionState.CONNECTED -> {
                         speak("Motor connected")
-                        startThrottleLoop()
-                        startStatusQueryLoop()
-                        startSensorReadLoop()
+                        if (slaveMode.value) {
+                            startSlaveLoop()
+                        } else {
+                            startThrottleLoop()
+                            startStatusQueryLoop()
+                        }
                     }
                     TorqeedoBleManager.ConnectionState.DISCONNECTED -> {
                         speak("Motor disconnected")
                         stopAllLoops()
                     }
                     else -> {}
+                }
+            }
+        }
+        
+        // Watch for slaveMode changes while connected
+        scope.launch {
+            slaveMode.collect { isSlave ->
+                if (motorManager?.connectionState?.value == TorqeedoBleManager.ConnectionState.CONNECTED) {
+                    if (isSlave) {
+                        stopThrottleLoop()
+                        stopStatusQueryLoop()
+                        startSlaveLoop()
+                    } else {
+                        stopSlaveLoop()
+                        startThrottleLoop()
+                        startStatusQueryLoop()
+                    }
                 }
             }
         }
@@ -293,6 +313,13 @@ object BleRepository : TextToSpeech.OnInitListener {
         val oldValue = steerValue.value
         if (oldValue != clamped) {
             val delta = clamped - oldValue
+
+            // Safety: don't drive past physical limits if sensor is available
+            if (useRudderSensor) {
+                if (delta > 0 && rudderPosition.value >= 99f) return
+                if (delta < 0 && rudderPosition.value <= -99f) return
+            }
+
             steerValue.value = clamped
             val runtimeMs = abs(delta) * steerScale
             motorManager?.sendSteer(delta, runtimeMs)
@@ -301,6 +328,13 @@ object BleRepository : TextToSpeech.OnInitListener {
 
     fun adjustSteer(delta: Int) {
         if (delta == 0) return
+
+        // Safety: don't drive past physical limits if sensor is available
+        if (useRudderSensor) {
+            if (delta > 0 && rudderPosition.value >= 99f) return
+            if (delta < 0 && rudderPosition.value <= -99f) return
+        }
+
         val oldValue = steerValue.value
         val newValue = (oldValue + delta).coerceIn(-STEER_MAX, STEER_MAX)
         val actualDelta = newValue - oldValue
@@ -378,6 +412,11 @@ object BleRepository : TextToSpeech.OnInitListener {
             }
         }
     }
+    
+    private fun stopThrottleLoop() {
+        throttleJob?.cancel()
+        throttleJob = null
+    }
 
     private fun startStatusQueryLoop() {
         if (statusQueryJob?.isActive == true) return
@@ -392,15 +431,10 @@ object BleRepository : TextToSpeech.OnInitListener {
             }
         }
     }
-
-    private fun startSensorReadLoop() {
-        if (sensorReadJob?.isActive == true) return
-        sensorReadJob = scope.launch {
-            while(true) {
-                motorManager?.readCurrentSensor()
-                delay(SENSOR_READ_DELAY)
-            }
-        }
+    
+    private fun stopStatusQueryLoop() {
+        statusQueryJob?.cancel()
+        statusQueryJob = null
     }
 
     private fun startAutoPilotLoop() {
@@ -417,14 +451,59 @@ object BleRepository : TextToSpeech.OnInitListener {
         autoPilotJob?.cancel()
         autoPilotJob = null
     }
+    
+    private fun startSlaveLoop() {
+        if (slaveJob?.isActive == true) return
+        slaveJob = scope.launch {
+            // Listen to incoming drive commands and status queries, then respond ASAP (Reactive)
+            motorManager?.statusFlow?.collect { status ->
+                val dest = status.destAddr ?: return@collect
+                
+                // Watch for traffic addressed to relevant bus devices being polled by master
+                val isPolled = dest == TorqeedoProtocol.MASTER_ADDR ||
+                               dest == TorqeedoProtocol.REMOTE1_ADDR ||
+                               dest == TorqeedoProtocol.DISPLAY_ADDR ||
+                               dest == TorqeedoProtocol.MOTOR_ADDR ||
+                               dest == TorqeedoProtocol.BATTERY_ADDR
+                
+                if (isPolled) {
+                    // Update local state if it was a drive command (syncing with Master poll/command)
+                    status.targetSpeed?.let { speed ->
+                        if (speed >= 0) {
+                            direction.value = Direction.FORWARD
+                            speedMagnitude.value = speed
+                        } else {
+                            direction.value = Direction.REVERSE
+                            speedMagnitude.value = -speed
+                        }
+                    }
+                    
+                    // Reply ASAP (requirement is within 25ms) using the "Remote (0x01)" identity
+                    val replySpeed = currentSpeed.value
+                    motorManager?.sendDrive(replySpeed, TorqeedoProtocol.REMOTE_ADDR)
+                }
+            }
+        }
+    }
+    
+    private fun stopSlaveLoop() {
+        slaveJob?.cancel()
+        slaveJob = null
+    }
 
     private suspend fun syncRudderToTarget(target: Float) {
-        val maxAttempts = 8
+        //todo: add turn off linear motor when target is reached or AP is turned off by sending steer command with timeMS=0
+        val maxAttempts = 5
         for (i in 0 until maxAttempts) {
             // Allow exit if AP is turned off, unless we are resetting to zero
             if (!autoPilotActive.value && target != 0f) break
             
             val currentRudderPos = rudderPosition.value
+
+            // Safety: stop if already at limit in the desired direction
+            if (currentRudderPos >= 99f && target > currentRudderPos) break
+            if (currentRudderPos <= -99f && target < currentRudderPos) break
+
             val rudderError = target - currentRudderPos
 
             if (abs(rudderError) < 1.5f) break
@@ -433,10 +512,10 @@ object BleRepository : TextToSpeech.OnInitListener {
             adjustSteer(step)
             
             // Trigger status query to get faster sensor update
-            motorManager?.sendSteerStatusQuery()
+            //motorManager?.sendSteerStatusQuery()  // comment out, sensor update is fixed rate
             
-            // Wait for motor to move and sensor to update
-            delay(100)
+            // Is delay here useful or harmful?
+            delay(50)
         }
     }
 
@@ -497,8 +576,12 @@ object BleRepository : TextToSpeech.OnInitListener {
             // STEERING SLEW RATE LIMITER
             //--------------------------------------------------
             val currentOutput = if (useRudderSensor) rudderPosition.value else steerValue.value.toFloat()
-            val delta = (targetOutput - currentOutput).coerceIn(-maxStepPerUpdate, maxStepPerUpdate)
-            val output = currentOutput + delta
+            var delta = (targetOutput - currentOutput).coerceIn(-maxStepPerUpdate, maxStepPerUpdate)
+
+            // Small deadband to avoid constant minor adjustments
+            if (abs(delta) < 0.5f) delta = 0f
+
+            val output = (currentOutput + delta).coerceIn(-100f, 100f)
 
             //--------------------------------------------------
             // APPLY OUTPUT
@@ -506,7 +589,9 @@ object BleRepository : TextToSpeech.OnInitListener {
             if (useRudderSensor) {
                 syncRudderToTarget(output)
             } else {
-                setSteerValue(output.toInt())
+                if (abs(delta) >= 1.0f) {
+                    setSteerValue(output.toInt())
+                }
             }
         } finally {
             isUpdatingAutoPilot = false
@@ -516,10 +601,10 @@ object BleRepository : TextToSpeech.OnInitListener {
     private fun stopAllLoops() {
         throttleJob?.cancel()
         statusQueryJob?.cancel()
-        sensorReadJob?.cancel()
         autoAdjustmentJob?.cancel()
         steerRepeatJob?.cancel()
         autoPilotJob?.cancel()
+        slaveJob?.cancel()
     }
 
     private fun setupRemoteCommands() {

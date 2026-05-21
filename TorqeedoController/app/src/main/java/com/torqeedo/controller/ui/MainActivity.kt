@@ -84,6 +84,9 @@ class MainActivity : AppCompatActivity() {
         binding.switchQmcLpf.setOnCheckedChangeListener { _, isChecked ->
             vm.setQmcLpfEnabled(isChecked)
         }
+        binding.switchSlaveMode.setOnCheckedChangeListener { _, isChecked ->
+            vm.setSlaveMode(isChecked)
+        }
 
         // Scan Settings
         binding.switchScanAll.setOnCheckedChangeListener { _, isChecked ->
@@ -369,6 +372,12 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     vm.qmcLpfEnabled.collectLatest { enabled ->
                         binding.switchQmcLpf.isChecked = enabled
+                    }
+                }
+
+                launch {
+                    vm.isSlaveMode.collectLatest { enabled ->
+                        binding.switchSlaveMode.isChecked = enabled
                     }
                 }
 
