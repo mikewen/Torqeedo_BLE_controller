@@ -25,6 +25,10 @@ object TorqeedoProtocol {
     const val MSGID_DRIVE: Byte = 0x82.toByte()
     const val MSGID_STATUS: Byte = 0x03.toByte() // Status query message ID (MOTOR_PARAM)
 
+    const val QMC6308_HEADER: Byte = 0xA5.toByte()
+    const val STEER_SENSOR_HEADER: Byte = 0xA8.toByte()
+    const val VL53L0X_HEADER: Byte = 0xA9.toByte()
+
     private const val DRIVE_FLAGS: Byte = 0x01
 
     // ---------- File logging ----------
@@ -545,7 +549,7 @@ object TorqeedoProtocol {
      * Parses the new steering sensor frame (7 bytes starting with 0xA8)
      */
     fun parseSteerSensor(frame: ByteArray): SteerSensorData? {
-        if (frame.size < 7 || (frame[0].toInt() and 0xFF) != 0xA8) return null
+        if (frame.size < 7 || (frame[0].toInt() and 0xFF) != STEER_SENSOR_HEADER.toInt() and 0xFF) return null
 
         val sensorA = u16le(frame[1], frame[2])
         val sensorB = u16le(frame[3], frame[4])
@@ -555,11 +559,22 @@ object TorqeedoProtocol {
     }
 
     /**
+     * Parses the VL53L0X distance sensor frame (4 bytes starting with 0xA9)
+     * [0] Header 0xA9, [1] Seq, [2-3] Distance (LSB, MSB)
+     */
+    fun parseVL53L0X(frame: ByteArray): VL53L0XData? {
+        if (frame.size < 4 || (frame[0].toInt() and 0xFF) != VL53L0X_HEADER.toInt() and 0xFF) return null
+        val seq = frame[1].toInt() and 0xFF
+        val distance = u16le(frame[2], frame[3])
+        return VL53L0XData(seq, distance, frame)
+    }
+
+    /**
      * Parses the QMC6308 sensor frame (8 bytes starting with 0xA5)
      * [0] Header 0xA5, [1] Seq, [2-3] X, [4-5] Y, [6-7] Z
      */
     fun parseQmc6308(frame: ByteArray): QMC6308Data? {
-        if (frame.size < 8 || (frame[0].toInt() and 0xFF) != 0xA5) return null
+        if (frame.size < 8 || (frame[0].toInt() and 0xFF) != QMC6308_HEADER.toInt() and 0xFF) return null
         val x = s16le(frame[2], frame[3])
         val y = s16le(frame[4], frame[5])
         val z = s16le(frame[6], frame[7])
@@ -573,6 +588,15 @@ object TorqeedoProtocol {
         val sensorA: Int,
         val sensorB: Int,
         val vcc: Int,
+        val rawBytes: ByteArray
+    )
+
+    /**
+     * Data model for the VL53L0X distance sensor (0xA9)
+     */
+    data class VL53L0XData(
+        val seq: Int,
+        val distance: Int,
         val rawBytes: ByteArray
     )
 

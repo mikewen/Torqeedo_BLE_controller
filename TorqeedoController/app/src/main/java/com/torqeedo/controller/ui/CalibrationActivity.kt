@@ -2,6 +2,7 @@ package com.torqeedo.controller.ui
 
 import android.annotation.SuppressLint
 import android.os.Bundle
+import android.view.View
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Lifecycle
@@ -10,6 +11,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.google.android.material.snackbar.Snackbar
 import com.torqeedo.controller.databinding.ActivityCalibrationBinding
 import com.torqeedo.controller.viewmodel.MainViewModel
+import com.torqeedo.controller.viewmodel.SteerSensorType
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -45,7 +47,17 @@ class CalibrationActivity : AppCompatActivity() {
             vm.setUseKalmanFilter(isChecked)
         }
 
-        // Mag Ellipse Calibration (Steering)
+        // Steer Sensor Type Toggle
+        binding.toggleSteerSensorType.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (isChecked) {
+                when (checkedId) {
+                    binding.btnTypeQmc.id -> vm.setSteerSensorType(SteerSensorType.QMC6308)
+                    binding.btnTypeVl53.id -> vm.setSteerSensorType(SteerSensorType.VL53L0X)
+                }
+            }
+        }
+
+        // Mag Ellipse Calibration (Steering - QMC Only)
         binding.btnStartMagEllipse.setOnClickListener {
             vm.startMagEllipseCalib()
             showSnack("Recording magnetic samples...")
@@ -62,7 +74,7 @@ class CalibrationActivity : AppCompatActivity() {
             showSnack("Ellipse calibration cleared")
         }
 
-        // Legacy/Mag Rudder Calibration
+        // Steer Calibration (Generic - reuses QMC or VL53 based on ViewModel logic)
         binding.btnCalibZero.setOnClickListener {
             vm.calibrateZero()
             showSnack("Zero position (0%) calibrated")
@@ -167,7 +179,21 @@ class CalibrationActivity : AppCompatActivity() {
                     }
                 }
 
-                // Rudder/Ellipse Data
+                // Steering Sensor Data
+                launch {
+                    vm.steerSensorType.collectLatest { type ->
+                        val isQmc = type == SteerSensorType.QMC6308
+                        binding.toggleSteerSensorType.check(if (isQmc) binding.btnTypeQmc.id else binding.btnTypeVl53.id)
+                        binding.layoutQmcRaw.visibility = if (isQmc) View.VISIBLE else View.GONE
+                        //binding.layoutVl53Raw.visibility = if (isQmc) View.GONE else View.VISIBLE
+                        
+                        // Disable ellipse buttons for VL53
+                        binding.btnStartMagEllipse.isEnabled = isQmc
+                        binding.btnStopMagEllipse.isEnabled = isQmc
+                        binding.btnSaveMagEllipse.isEnabled = isQmc
+                        binding.btnClearMagEllipse.isEnabled = isQmc
+                    }
+                }
                 launch {
                     vm.magX.collectLatest { x -> binding.tvMagX.text = "X: $x" }
                 }
@@ -177,17 +203,33 @@ class CalibrationActivity : AppCompatActivity() {
                 launch {
                     vm.magZ.collectLatest { z -> binding.tvMagZ.text = "Z: $z" }
                 }
-                launch {    //steerSensorAngle
-                    //combine(vm.magRudderAngle, vm.magRudderPercentage) { angle, percent -> "Angle: %.1f° (%.1f%%)".format(angle, percent)
-                    combine(vm.rawMagAngle, vm.magRudderPercentage) { angle, percent -> "Angle: %.1f° (%.1f%%)".format(angle, percent)
+//                launch {
+//                    vm.vl53l0xDistance.collectLatest { dist ->
+//                        binding.tvVl53Distance.text = "Distance: $dist mm"
+//                    }
+//                }
+//                launch {
+//                    vm.rawVl53Frame.collectLatest { frame ->
+//                        binding.tvRawVl53.text = "Raw: " + (frame?.joinToString(" ") { "%02X".format(it) } ?: "--")
+//                    }
+//                }
+                launch {
+                    combine(vm.rawMagAngle, vm.magRudderPercentage, vm.vl53l0xDistance, vm.steerSensorType) { angle, percent, dist, type ->
+                        if (type == SteerSensorType.QMC6308) {
+                            "Angle: %.1f° (%.1f%%)".format(angle, percent)
+                        } else {
+                            "Dist: $dist mm (%.1f%%)".format(percent)
+                        }
                     }.collectLatest { text ->
                         binding.tvRudderPos.text = text
                     }
                 }
                 launch {
                     vm.isMagCalibrating.collectLatest { isCalibrating ->
-                        binding.btnStartMagEllipse.isEnabled = !isCalibrating
-                        binding.btnStopMagEllipse.isEnabled = isCalibrating
+                        if (vm.steerSensorType.value == SteerSensorType.QMC6308) {
+                            binding.btnStartMagEllipse.isEnabled = !isCalibrating
+                            binding.btnStopMagEllipse.isEnabled = isCalibrating
+                        }
                     }
                 }
             }

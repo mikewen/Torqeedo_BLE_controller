@@ -4,10 +4,12 @@ import android.util.Log
 import kotlin.math.*
 
 /**
- * Processor for linear Hall sensor feedback or Magnetometer steering using a 2D Vector Path Interpolation Engine.
+ * Processor for linear Hall sensor feedback, Magnetometer steering, or ToF Distance sensor
+ * using a 1D/2D Vector Path Interpolation Engine.
  *
  * This handles non-monotonic responses by treating (SensorA, SensorB) or (MagX, MagY)
  * as a point in 2D space and projects it onto a calibrated steering path.
+ * For 1D sensors (like VL53L0X), it uses only the X component (Distance).
  */
 class SteerSensorProcessor {
     companion object {
@@ -24,6 +26,8 @@ class SteerSensorProcessor {
         const val MIN_MAGNITUDE = 5f
     }
 
+    var is1DMode: Boolean = false
+
     var bias1: Int = DEFAULT_BIAS
     var bias2: Int = DEFAULT_BIAS
 
@@ -37,7 +41,7 @@ class SteerSensorProcessor {
     private var ellipseB: Float = 1.0f
     private var ellipseTheta: Float = 0.0f
 
-    // Calibrated path in ADC/Mag space
+    // Calibrated path in ADC/Mag/Distance space
     private val pathA = FloatArray(TABLE_SIZE)
     private val pathB = FloatArray(TABLE_SIZE)
     private val angleTable = FloatArray(TABLE_SIZE)
@@ -111,6 +115,8 @@ class SteerSensorProcessor {
     }
 
     private fun transform(x: Float, y: Float): Pair<Float, Float> {
+        if (is1DMode) return Pair(x, 0f)
+        
         val dx = x - bias1
         val dy = y - bias2
         if (!useEllipseCorrection) return Pair(dx, dy)
@@ -130,19 +136,24 @@ class SteerSensorProcessor {
         // Stage 1: Filter raw inputs
         if (firstSample) {
             filteredA = rawA.toFloat()
-            filteredB = rawB.toFloat()
+            filteredB = if (is1DMode) 0f else rawB.toFloat()
         } else {
             filteredA += LPF_BETA_RAW * (rawA - filteredA)
-            filteredB += LPF_BETA_RAW * (rawB - filteredB)
+            if (is1DMode) {
+                filteredB = 0f
+            } else {
+                filteredB += LPF_BETA_RAW * (rawB - filteredB)
+            }
         }
 
         val (curA, curB) = transform(filteredA, filteredB)
         
-        // Stage 2: Magnitude check
-        val mag = sqrt(curA * curA + curB * curB)
-
-        if (mag < MIN_MAGNITUDE) {
-            return filteredAngle 
+        // Stage 2: Magnitude check (bypass for 1D)
+        if (!is1DMode) {
+            val mag = sqrt(curA * curA + curB * curB)
+            if (mag < MIN_MAGNITUDE) {
+                return filteredAngle 
+            }
         }
 
         val rawAngle = findAngleOnPath(curA, curB)

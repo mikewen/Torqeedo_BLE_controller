@@ -42,12 +42,13 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         val SERVICE_WIT_UUID: UUID = UUID.fromString("0000ffe0-0000-1000-8000-00805f9b34fb")
         val CHAR_WIT_UUID: UUID    = UUID.fromString("0000ffe1-0000-1000-8000-00805f9b34fb")
 
-        private const val MMC5603_HEADER: Byte = 0xA5.toByte()
+        //private const val MMC5603_HEADER: Byte = 0xA5.toByte()
         private const val QMC6308_HEADER: Byte = 0xA5.toByte()
         private const val IMU_A1_HEADER: Byte = 0xA1.toByte()
         private const val GNSS_A2_HEADER: Byte = 0xA2.toByte()
         private const val GPS_HEADER: Byte = 0xA3.toByte()
         private const val STEER_SENSOR_HEADER: Byte = 0xA8.toByte()
+        private const val VL53L0X_HEADER: Byte = 0xA9.toByte()
     }
 
     private var ae10Char: BluetoothGattCharacteristic? = null
@@ -153,6 +154,9 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
     private val _steerSensorData = MutableSharedFlow<TorqeedoProtocol.SteerSensorData>(replay = 1)
     val steerSensorData: SharedFlow<TorqeedoProtocol.SteerSensorData> = _steerSensorData.asSharedFlow()
 
+    private val _vl53l0xData = MutableSharedFlow<TorqeedoProtocol.VL53L0XData>(replay = 1)
+    val vl53l0xData: SharedFlow<TorqeedoProtocol.VL53L0XData> = _vl53l0xData.asSharedFlow()
+
     private val _rawStatusFlow = MutableSharedFlow<ByteArray>(replay = 1)
     val rawStatusFlow: SharedFlow<ByteArray> = _rawStatusFlow.asSharedFlow()
 
@@ -213,8 +217,9 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
             val idxA2 = rxBuffer.indexOf(GNSS_A2_HEADER)
             val idxA3 = rxBuffer.indexOf(GPS_HEADER)
             val idxA8 = rxBuffer.indexOf(STEER_SENSOR_HEADER)
+            val idxA9 = rxBuffer.indexOf(VL53L0X_HEADER)
 
-            val startIdx = listOf(idxAC, idxA5, idxA1, idxA2, idxA3, idxA8).filter { it != -1 }.minOrNull() ?: -1
+            val startIdx = listOf(idxAC, idxA5, idxA1, idxA2, idxA3, idxA8, idxA9).filter { it != -1 }.minOrNull() ?: -1
 
             if (startIdx == -1) {
                 if (rxBuffer.size > 1024) rxBuffer.clear()
@@ -238,7 +243,8 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                                 nextHeader != IMU_A1_HEADER &&
                                 nextHeader != GNSS_A2_HEADER &&
                                 nextHeader != GPS_HEADER && 
-                                nextHeader != STEER_SENSOR_HEADER) {
+                                nextHeader != STEER_SENSOR_HEADER &&
+                                nextHeader != VL53L0X_HEADER) {
                                 packetLen = 11
                             }
                         }
@@ -329,6 +335,21 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                         return
                     }
                 }
+                VL53L0X_HEADER -> {
+                    if (rxBuffer.size >= 4) {
+                        val frame = rxBuffer.take(4).toByteArray()
+                        repeat(4) { rxBuffer.removeAt(0) }
+                        TorqeedoProtocol.parseVL53L0X(frame)?.let { data ->
+                            _vl53l0xData.tryEmit(data)
+                        }
+                        if (isRawDataEnabled) {
+                            logToFile("RECV_VL53L0X", frame)
+                            _rawStatusFlow.tryEmit(frame)
+                        }
+                    } else {
+                        return
+                    }
+                }
                 else -> {
                     var frameEndIdx = -1
                     for (i in 1 until rxBuffer.size) {
@@ -338,7 +359,8 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
                             rxBuffer[i] == IMU_A1_HEADER ||
                             rxBuffer[i] == GNSS_A2_HEADER ||
                             rxBuffer[i] == GPS_HEADER ||
-                            rxBuffer[i] == STEER_SENSOR_HEADER) {
+                            rxBuffer[i] == STEER_SENSOR_HEADER ||
+                            rxBuffer[i] == VL53L0X_HEADER) {
                             frameEndIdx = i
                             break
                         }

@@ -127,10 +127,10 @@ object BleRepository : TextToSpeech.OnInitListener {
     // --- Navigation State ---
     private val _targetLocation = MutableStateFlow<GeoPoint?>(null)
     val targetLocation: StateFlow<GeoPoint?> = _targetLocation.asStateFlow()
-    
+
     private val _targetName = MutableStateFlow<String?>(null)
     val targetName: StateFlow<String?> = _targetName.asStateFlow()
-    
+
     private val _waypoints = MutableStateFlow<List<Waypoint>>(emptyList())
     val waypoints: StateFlow<List<Waypoint>> = _waypoints.asStateFlow()
     private val _currentLocation = MutableStateFlow<GeoPoint?>(null)
@@ -148,23 +148,23 @@ object BleRepository : TextToSpeech.OnInitListener {
 
     fun getImuManager(context: Context): TorqeedoBleManager {
         initTts(context)
-        return imuManager ?: TorqeedoBleManager(context.applicationContext).also { 
-            imuManager = it 
+        return imuManager ?: TorqeedoBleManager(context.applicationContext).also {
+            imuManager = it
             observeImuConnection(it)
         }
     }
 
     fun getGpsManager(context: Context): TorqeedoBleManager {
         initTts(context)
-        return gpsManager ?: TorqeedoBleManager(context.applicationContext).also { 
-            gpsManager = it 
+        return gpsManager ?: TorqeedoBleManager(context.applicationContext).also {
+            gpsManager = it
             observeGpsConnection(it)
         }
     }
 
     fun getRemote(context: Context): LookbonRemote {
         initTts(context)
-        return remote ?: LookbonRemote(context.applicationContext).also { 
+        return remote ?: LookbonRemote(context.applicationContext).also {
             remote = it
             setupRemoteCommands()
         }
@@ -191,7 +191,7 @@ object BleRepository : TextToSpeech.OnInitListener {
                 }
             }
         }
-        
+
         scope.launch {
             manager.imuA1Data.collect {
                 lastGyroUpdateTime = System.currentTimeMillis()
@@ -497,6 +497,7 @@ object BleRepository : TextToSpeech.OnInitListener {
             targetHeading.value = trueHeading.value
             autopilotLastError = 0f
             autopilotIntegral = 0f
+            useRudderSensor = true
             speak("Auto pilot on, heading ${targetHeading.value.toInt()} degrees")
             startAutoPilotLoop()
         } else {
@@ -505,8 +506,8 @@ object BleRepository : TextToSpeech.OnInitListener {
                 stopAutoPilotLoop()
                 //resetSteer()
                 rudderPosition.value = 0.0f
-                useRudderSensor = false
             }
+            useRudderSensor = false
         }
         autoPilotActive.value = active
     }

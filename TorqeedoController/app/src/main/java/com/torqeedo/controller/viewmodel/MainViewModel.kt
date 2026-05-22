@@ -24,6 +24,8 @@ import org.osmdroid.util.GeoPoint
 import java.util.Locale
 import kotlin.math.*
 
+enum class SteerSensorType { QMC6308, VL53L0X }
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     data class RawImuData(
@@ -42,6 +44,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_REMOTE_MAC = "remote_mac"
         private const val KEY_STEER_SCALE = "steer_scale"
         private const val KEY_SLAVE_MODE = "slave_mode"
+        private const val KEY_STEER_SENSOR_TYPE = "steer_sensor_type"
 
         private const val KEY_CALIB_POINTS = "steer_calib_points_v2"
 
@@ -121,6 +124,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isSlaveMode = MutableStateFlow(prefs.getBoolean(KEY_SLAVE_MODE, false))
     val isSlaveMode: StateFlow<Boolean> = _isSlaveMode.asStateFlow()
 
+    private val _steerSensorType = MutableStateFlow(
+        SteerSensorType.valueOf(prefs.getString(KEY_STEER_SENSOR_TYPE, SteerSensorType.QMC6308.name) ?: SteerSensorType.QMC6308.name)
+    )
+    val steerSensorType: StateFlow<SteerSensorType> = _steerSensorType.asStateFlow()
+
     // --- Bluetooth ---
     private val bluetoothManager: BluetoothManager = application.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter = bluetoothManager.adapter
@@ -175,6 +183,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _steerSensorAngle = MutableStateFlow(0f)
     val steerSensorAngle: StateFlow<Float> = _steerSensorAngle.asStateFlow()
 
+    private val _vl53l0xDistance = MutableStateFlow(0)
+    val vl53l0xDistance: StateFlow<Int> = _vl53l0xDistance.asStateFlow()
+    private val _rawVl53Frame = MutableStateFlow<ByteArray?>(null)
+    val rawVl53Frame: StateFlow<ByteArray?> = _rawVl53Frame.asStateFlow()
+
     val steerSensorRatio: StateFlow<Float> = combine(_steerSensorA, _steerSensorB) { a, b ->
         steerProcessor.getRatio(a, b)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
@@ -218,7 +231,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val magRudderAngle: StateFlow<Float> = combine(_magX, _magY, _magEllipseResult) { x, y, res ->
         if (res != null) {
             val norm = magCalibrator.normalize(x.toFloat(), y.toFloat(), res)
-            Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
+            val deg = Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
+            deg
         } else 0f
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
 
@@ -295,12 +309,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lastA1Time = 0L
 
     init {
+        steerProcessor.is1DMode = (_steerSensorType.value == SteerSensorType.VL53L0X)
         loadSensorFusionOffsets()
         loadSteerCalib()
         setupSync()
         //setupMagnetometer()
-        setupQmc6308()
-        setupSteerSensor()
+        //setupQmc6308()
+        //setupSteerSensor()
+        setupVL53L0X()
         setupIMU()
         setupBleGps()
         setupAutoCalibration()
@@ -360,7 +376,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val xU = (x.toInt() and 0xFFFF); val yU = (y.toInt() and 0xFFFF); val zU = (z.toInt() and 0xFFFF)
                     _magX.value = xU - 524288; _magY.value = yU - 524288; _magZ.value = zU - 524288
                     if (_isMagCalibrating.value) magCalibrator.addSample(_magX.value.toFloat(), _magY.value.toFloat())
-                    _steerSensorAngle.value = steerProcessor.calculateAngle(_magX.value, _magY.value)
+                    if (_steerSensorType.value == SteerSensorType.QMC6308) {
+                        _steerSensorAngle.value = steerProcessor.calculateAngle(_magX.value, _magY.value)
+                    }
                 }
             }
         }
@@ -380,9 +398,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     lx = data.x.toFloat(); ly = data.y.toFloat(); lz = data.z.toFloat()
                 }
                 if (_isMagCalibrating.value) magCalibrator.addSample(_magX.value.toFloat(), _magY.value.toFloat())
-                _steerSensorAngle.value = steerProcessor.calculateAngle(_magX.value, _magY.value)
-                //getRawMagAngle
-                //_steerSensorAngle.value = steerProcessor.getRawMagAngle(_magX.value, _magY.value)
+                
+                if (_steerSensorType.value == SteerSensorType.QMC6308) {
+                    _steerSensorAngle.value = steerProcessor.calculateAngle(_magX.value, _magY.value)
+                }
+                
                 val rawAngle = Math.toDegrees(atan2(_magY.value.toDouble(), _magX.value.toDouble())).toFloat()
                 _rawMagAngle.value = rawAngle
             }
@@ -394,6 +414,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             motorManager.steerSensorData.collect { data ->
                 _steerSensorA.value = data.sensorA; _steerSensorB.value = data.sensorB
                 // _steerSensorAngle.value = steerProcessor.calculateAngle(data.sensorA, data.sensorB)
+            }
+        }
+    }
+
+    private fun setupVL53L0X() {
+        viewModelScope.launch {
+            motorManager.vl53l0xData.collect { data ->
+                _vl53l0xDistance.value = data.distance
+                _rawVl53Frame.value = data.rawBytes
+                if (_steerSensorType.value == SteerSensorType.VL53L0X) {
+                    _steerSensorAngle.value = steerProcessor.calculateAngle(data.distance, 0)
+                }
             }
         }
     }
@@ -648,6 +680,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setUseKalmanFilter(v: Boolean) { _useKalmanFilter.value = v; sensorFusion.useKalman = v; prefs.edit().putBoolean(KEY_SF_USE_KALMAN, v).apply(); sensorFusion.resetFilter(); speak("Kalman filter ${if(v) "enabled" else "disabled"}") }
     fun setSlaveMode(s: Boolean) = prefs.edit().putBoolean(KEY_SLAVE_MODE, s).apply().also { _isSlaveMode.value = s; BleRepository.slaveMode.value = s; speak("Slave mode ${if(s) "on" else "off"}") }
 
+    fun setSteerSensorType(type: SteerSensorType) {
+        _steerSensorType.value = type
+        steerProcessor.is1DMode = (type == SteerSensorType.VL53L0X)
+        prefs.edit().putString(KEY_STEER_SENSOR_TYPE, type.name).apply()
+        loadSteerCalib()
+        speak("Steer sensor ${type.name}")
+    }
+
     fun connectToDevice(address: String) {
         val device = bluetoothAdapter.getRemoteDevice(address)
         viewModelScope.launch {
@@ -666,40 +706,56 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun speak(text: String) = BleRepository.speak(text)
 
     fun calibrateZero() {
-        steerProcessor.calibrateZero(_magX.value, _magY.value)
-        _magEllipseResult.value?.let { res ->
-            val norm = magCalibrator.normalize(_magX.value.toFloat(), _magY.value.toFloat(), res)
-            val deg = Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
-            _magCalibZeroDeg.value = deg
-            prefs.edit().putFloat(KEY_MAG_CALIB_ZERO_DEG, deg).apply()
+        if (_steerSensorType.value == SteerSensorType.VL53L0X) {
+            steerProcessor.calibrateZero(_vl53l0xDistance.value, 0)
+        } else {
+            steerProcessor.calibrateZero(_magX.value, _magY.value)
+            _magEllipseResult.value?.let { res ->
+                val norm = magCalibrator.normalize(_magX.value.toFloat(), _magY.value.toFloat(), res)
+                val deg = Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
+                _magCalibZeroDeg.value = deg
+                prefs.edit().putFloat(KEY_MAG_CALIB_ZERO_DEG, deg).apply()
+            }
         }
         saveSteerCalib()
     }
 
     fun calibratePort() {
-        steerProcessor.calibratePort(_magX.value, _magY.value)
-        _magEllipseResult.value?.let { res ->
-            val norm = magCalibrator.normalize(_magX.value.toFloat(), _magY.value.toFloat(), res)
-            val deg = Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
-            _magCalibPortDeg.value = deg
-            prefs.edit().putFloat(KEY_MAG_CALIB_PORT_DEG, deg).apply()
+        if (_steerSensorType.value == SteerSensorType.VL53L0X) {
+            steerProcessor.calibratePort(_vl53l0xDistance.value, 0)
+        } else {
+            steerProcessor.calibratePort(_magX.value, _magY.value)
+            _magEllipseResult.value?.let { res ->
+                val norm = magCalibrator.normalize(_magX.value.toFloat(), _magY.value.toFloat(), res)
+                val deg = Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
+                _magCalibPortDeg.value = deg
+                prefs.edit().putFloat(KEY_MAG_CALIB_PORT_DEG, deg).apply()
+            }
         }
         saveSteerCalib()
     }
 
     fun calibrateStbd() {
-        steerProcessor.calibrateStbd(_magX.value, _magY.value)
-        _magEllipseResult.value?.let { res ->
-            val norm = magCalibrator.normalize(_magX.value.toFloat(), _magY.value.toFloat(), res)
-            val deg = Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
-            _magCalibStbdDeg.value = deg
-            prefs.edit().putFloat(KEY_MAG_CALIB_STBD_DEG, deg).apply()
+        if (_steerSensorType.value == SteerSensorType.VL53L0X) {
+            steerProcessor.calibrateStbd(_vl53l0xDistance.value, 0)
+        } else {
+            steerProcessor.calibrateStbd(_magX.value, _magY.value)
+            _magEllipseResult.value?.let { res ->
+                val norm = magCalibrator.normalize(_magX.value.toFloat(), _magY.value.toFloat(), res)
+                val deg = Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
+                _magCalibStbdDeg.value = deg
+                prefs.edit().putFloat(KEY_MAG_CALIB_STBD_DEG, deg).apply()
+            }
         }
         saveSteerCalib()
     }
 
     fun addSteerCalibPoint(percentage: Float) {
-        steerProcessor.addCalibrationPoint(percentage, _magX.value.toFloat(), _magY.value.toFloat())
+        if (_steerSensorType.value == SteerSensorType.VL53L0X) {
+            steerProcessor.addCalibrationPoint(percentage, _vl53l0xDistance.value.toFloat(), 0f)
+        } else {
+            steerProcessor.addCalibrationPoint(percentage, _magX.value.toFloat(), _magY.value.toFloat())
+        }
         saveSteerCalib()
     }
 
