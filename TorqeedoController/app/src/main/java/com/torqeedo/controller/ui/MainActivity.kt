@@ -25,6 +25,7 @@ import com.torqeedo.controller.R
 import com.torqeedo.controller.ble.Direction
 import com.torqeedo.controller.ble.TorqeedoBleManager
 import com.torqeedo.controller.databinding.ActivityMainBinding
+import com.torqeedo.controller.viewmodel.BoatProfile
 import com.torqeedo.controller.viewmodel.MainViewModel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
@@ -67,6 +68,18 @@ class MainActivity : AppCompatActivity() {
         binding.rvDevices.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = deviceAdapter
+        }
+
+        binding.toggleBoatProfile.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (isChecked) {
+                val profile = when (checkedId) {
+                    R.id.btnProfileCL16 -> BoatProfile.CL16
+                    R.id.btnProfileMac25 -> BoatProfile.MAC25
+                    R.id.btnProfileToy -> BoatProfile.TOY
+                    else -> BoatProfile.CL16
+                }
+                vm.setBoatProfile(profile)
+            }
         }
 
         binding.switchShowRaw.setOnCheckedChangeListener { _, isChecked ->
@@ -232,15 +245,29 @@ class MainActivity : AppCompatActivity() {
     private fun observeState() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
+                // Profile State
+                launch {
+                    vm.currentProfile.collectLatest { profile ->
+                        val btnId = when (profile) {
+                            BoatProfile.CL16 -> R.id.btnProfileCL16
+                            BoatProfile.MAC25 -> R.id.btnProfileMac25
+                            BoatProfile.TOY -> R.id.btnProfileToy
+                        }
+                        binding.toggleBoatProfile.check(btnId)
+                    }
+                }
+
                 // Control Panel Visibility
                 launch {
                     combine(vm.motorConnectionState, vm.imuConnectionState, vm.gpsConnectionState, vm.remoteConnected) { motor, imu, gps, remote ->
                         val motorConnected = motor == TorqeedoBleManager.ConnectionState.CONNECTED
+                        val motorSelected = motor != TorqeedoBleManager.ConnectionState.DISCONNECTED
                         val anyConnected = motorConnected || imu == TorqeedoBleManager.ConnectionState.CONNECTED || gps == TorqeedoBleManager.ConnectionState.CONNECTED || remote
-                        Pair(anyConnected, motorConnected)
-                    }.collectLatest { (anyConnected, motorConnected) ->
+                        Triple(anyConnected, motorConnected, motorSelected)
+                    }.collectLatest { (anyConnected, motorConnected, motorSelected) ->
                         binding.controlPanel.visibility = if (motorConnected) View.VISIBLE else View.GONE
                         binding.scanPanel.visibility    = if (motorConnected) View.GONE else View.VISIBLE
+                        binding.profileSelector.visibility = if (motorSelected) View.GONE else View.VISIBLE
                     }
                 }
 

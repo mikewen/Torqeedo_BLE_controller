@@ -65,6 +65,52 @@
             android:textSize="11sp" />
     </LinearLayout>
 
+    <!-- BOAT PROFILE SELECTION -->
+    <LinearLayout
+        android:id="@+id/profileSelector"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/bg_surface"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="8dp"
+        android:gravity="center"
+        app:layout_constraintTop_toBottomOf="@id/statusBar">
+
+        <com.google.android.material.button.MaterialButtonToggleGroup
+            android:id="@+id/toggleBoatProfile"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            app:singleSelection="true"
+            app:selectionRequired="true">
+
+            <Button
+                android:id="@+id/btnProfileCL16"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="CL16"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btnProfileMac25"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Mac25"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btnProfileToy"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Toy"
+                android:textSize="12sp" />
+
+        </com.google.android.material.button.MaterialButtonToggleGroup>
+    </LinearLayout>
+
     <!-- DEBUG SETTINGS -->
     <LinearLayout
         android:id="@+id/debugSettings"
@@ -74,7 +120,7 @@
         android:orientation="vertical"
         android:paddingHorizontal="16dp"
         android:paddingVertical="4dp"
-        app:layout_constraintTop_toBottomOf="@id/statusBar">
+        app:layout_constraintTop_toBottomOf="@id/profileSelector">
 
         <!-- Row 1: Raw, Log, Slave -->
         <LinearLayout

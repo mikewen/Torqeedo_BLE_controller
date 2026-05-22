@@ -26,6 +26,8 @@ import kotlin.math.*
 
 enum class SteerSensorType { QMC6308, VL53L0X }
 
+enum class BoatProfile { CL16, MAC25, TOY }
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     data class RawImuData(
@@ -37,6 +39,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
         private const val TAG = "MainViewModel"
         private const val PREFS_NAME = "torqeedo_prefs"
+        
+        private const val KEY_CURRENT_PROFILE = "current_boat_profile"
+        
         private const val KEY_SHOW_RAW = "show_raw"
         private const val KEY_LOGGING = "logging"
         private const val KEY_VOICE = "voice"
@@ -45,6 +50,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_STEER_SCALE = "steer_scale"
         private const val KEY_SLAVE_MODE = "slave_mode"
         private const val KEY_STEER_SENSOR_TYPE = "steer_sensor_type"
+        private const val KEY_BACKLASH_TIME = "backlash_time"
 
         private const val KEY_CALIB_POINTS = "steer_calib_points_v2"
 
@@ -90,6 +96,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val prefs: SharedPreferences = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+    // --- Profile Management ---
+    private val _currentProfile = MutableStateFlow(
+        BoatProfile.valueOf(prefs.getString(KEY_CURRENT_PROFILE, BoatProfile.CL16.name) ?: BoatProfile.CL16.name)
+    )
+    val currentProfile: StateFlow<BoatProfile> = _currentProfile.asStateFlow()
+
+    private fun pKey(key: String): String = "${_currentProfile.value.name}_$key"
+
     // --- Global State Proxies ---
     val direction: StateFlow<Direction> = BleRepository.direction
     val speedMagnitude: StateFlow<Int> = BleRepository.speedMagnitude
@@ -100,33 +114,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val slaveMode: StateFlow<Boolean> = BleRepository.slaveMode
 
     // --- Persisted Config Flows ---
-    private val _showRawData = MutableStateFlow(prefs.getBoolean(KEY_SHOW_RAW, true))
+    private val _showRawData = MutableStateFlow(true)
     val showRawData: StateFlow<Boolean> = _showRawData.asStateFlow()
 
-    private val _enableLogging = MutableStateFlow(prefs.getBoolean(KEY_LOGGING, true))
+    private val _enableLogging = MutableStateFlow(true)
     val enableLogging: StateFlow<Boolean> = _enableLogging.asStateFlow()
 
-    private val _enableVoicePrompts = MutableStateFlow(prefs.getBoolean(KEY_VOICE, true))
+    private val _enableVoicePrompts = MutableStateFlow(true)
     val enableVoicePrompts: StateFlow<Boolean> = _enableVoicePrompts.asStateFlow()
 
-    private val _showMotorStatus = MutableStateFlow(prefs.getBoolean(KEY_SHOW_MOTOR_STATUS, false))
+    private val _showMotorStatus = MutableStateFlow(false)
     val showMotorStatus: StateFlow<Boolean> = _showMotorStatus.asStateFlow()
 
-    private val _steerScale = MutableStateFlow(prefs.getInt(KEY_STEER_SCALE, 200))
+    private val _steerScale = MutableStateFlow(200)
     val steerScale: StateFlow<Int> = _steerScale.asStateFlow()
 
-    private val _qmcLpfEnabled = MutableStateFlow(prefs.getBoolean(KEY_QMC_LPF, false))
+    private val _backLashTime = MutableStateFlow(250)
+    val backLashTime: StateFlow<Int> = _backLashTime.asStateFlow()
+
+    private val _qmcLpfEnabled = MutableStateFlow(false)
     val qmcLpfEnabled: StateFlow<Boolean> = _qmcLpfEnabled.asStateFlow()
 
-    private val _useKalmanFilter = MutableStateFlow(prefs.getBoolean(KEY_SF_USE_KALMAN, false))
+    private val _useKalmanFilter = MutableStateFlow(false)
     val useKalmanFilter: StateFlow<Boolean> = _useKalmanFilter.asStateFlow()
 
-    private val _isSlaveMode = MutableStateFlow(prefs.getBoolean(KEY_SLAVE_MODE, false))
+    private val _isSlaveMode = MutableStateFlow(false)
     val isSlaveMode: StateFlow<Boolean> = _isSlaveMode.asStateFlow()
 
-    private val _steerSensorType = MutableStateFlow(
-        SteerSensorType.valueOf(prefs.getString(KEY_STEER_SENSOR_TYPE, SteerSensorType.QMC6308.name) ?: SteerSensorType.QMC6308.name)
-    )
+    private val _steerSensorType = MutableStateFlow(SteerSensorType.QMC6308)
     val steerSensorType: StateFlow<SteerSensorType> = _steerSensorType.asStateFlow()
 
     // --- Bluetooth ---
@@ -166,14 +181,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val magZ: StateFlow<Int> = _magZ.asStateFlow()
 
     private val magCalibrator = MagEllipseCalibrator()
-    private val _magEllipseResult = MutableStateFlow<MagEllipseCalibrator.Result?>(loadMagEllipse())
+    private val _magEllipseResult = MutableStateFlow<MagEllipseCalibrator.Result?>(null)
     val magEllipseResult = _magEllipseResult.asStateFlow()
     private val _isMagCalibrating = MutableStateFlow(false)
     val isMagCalibrating = _isMagCalibrating.asStateFlow()
 
-    private val _magCalibZeroDeg = MutableStateFlow(prefs.getFloat(KEY_MAG_CALIB_ZERO_DEG, 0f))
-    private val _magCalibPortDeg = MutableStateFlow(prefs.getFloat(KEY_MAG_CALIB_PORT_DEG, 0f))
-    private val _magCalibStbdDeg = MutableStateFlow(prefs.getFloat(KEY_MAG_CALIB_STBD_DEG, 0f))
+    private val _magCalibZeroDeg = MutableStateFlow(0f)
+    private val _magCalibPortDeg = MutableStateFlow(0f)
+    private val _magCalibStbdDeg = MutableStateFlow(0f)
 
     private val steerProcessor = SteerSensorProcessor()
     private val _steerSensorA = MutableStateFlow(0)
@@ -212,10 +227,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SeaState.CALM)
 
-    private val _declination = MutableStateFlow(prefs.getFloat(KEY_DECLINATION, 0f))
+    private val _declination = MutableStateFlow(0f)
     val declination: StateFlow<Float> = _declination.asStateFlow()
 
-    private val _headingOffset = MutableStateFlow(prefs.getFloat(KEY_HEADING_OFFSET, 0f))
+    private val _headingOffset = MutableStateFlow(0f)
     val headingOffset: StateFlow<Float> = _headingOffset.asStateFlow()
 
     val trueHeading: StateFlow<Float> = combine(IMUYaw, declination, headingOffset) { yaw, decl, offset ->
@@ -267,23 +282,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val targetName: StateFlow<String?> = BleRepository.targetName
 
     // --- PID Config ---
-    private val _apKp = MutableStateFlow(prefs.getFloat(KEY_AP_KP, DEFAULT_AP_KP))
+    private val _apKp = MutableStateFlow(DEFAULT_AP_KP)
     val apKp: StateFlow<Float> = _apKp.asStateFlow()
-    private val _apKi = MutableStateFlow(prefs.getFloat(KEY_AP_KI, DEFAULT_AP_KI))
+    private val _apKi = MutableStateFlow(DEFAULT_AP_KI)
     val apKi: StateFlow<Float> = _apKi.asStateFlow()
-    private val _apKd = MutableStateFlow(prefs.getFloat(KEY_AP_KD, DEFAULT_AP_KD))
+    private val _apKd = MutableStateFlow(DEFAULT_AP_KD)
     val apKd: StateFlow<Float> = _apKd.asStateFlow()
-    private val _apDeadband = MutableStateFlow(prefs.getFloat(KEY_AP_DEADBAND, DEFAULT_AP_DEADBAND))
+    private val _apDeadband = MutableStateFlow(DEFAULT_AP_DEADBAND)
     val apDeadband: StateFlow<Float> = _apDeadband.asStateFlow()
-    private val _apMaxRate = MutableStateFlow(prefs.getFloat(KEY_AP_MAX_RATE, DEFAULT_AP_MAX_RATE))
+    private val _apMaxRate = MutableStateFlow(DEFAULT_AP_MAX_RATE)
     val apMaxRate: StateFlow<Float> = _apMaxRate.asStateFlow()
-    private val _apDelay = MutableStateFlow(prefs.getLong(KEY_AP_DELAY, DEFAULT_AP_DELAY))
+    private val _apDelay = MutableStateFlow(DEFAULT_AP_DELAY)
     val apDelay: StateFlow<Long> = _apDelay.asStateFlow()
-    private val _useRudderSensor = MutableStateFlow(prefs.getBoolean(KEY_USE_RUDDER_SENSOR, false))
+    private val _useRudderSensor = MutableStateFlow(false)
     val useRudderSensor: StateFlow<Boolean> = _useRudderSensor.asStateFlow()
 
     private var lastBleGpsUpdate = 0L
-    private val _scanAllNames = MutableStateFlow(prefs.getBoolean(KEY_SCAN_ALL, false))
+    private val _scanAllNames = MutableStateFlow(false)
     val scanAllNames: StateFlow<Boolean> = _scanAllNames.asStateFlow()
     private val _imuCalibStatus = MutableStateFlow("Idle")
     val imuCalibStatus: StateFlow<String> = _imuCalibStatus.asStateFlow()
@@ -309,34 +324,99 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lastA1Time = 0L
 
     init {
-        steerProcessor.is1DMode = (_steerSensorType.value == SteerSensorType.VL53L0X)
-        loadSensorFusionOffsets()
-        loadSteerCalib()
+        refreshSettings()
         setupSync()
         //setupMagnetometer()
         setupQmc6308()
         //setupSteerSensor()
-        //setupVL53L0X()
+        setupVL53L0X()
         setupIMU()
         setupBleGps()
         setupAutoCalibration()
         setupSensorFusion()
     }
 
+    private fun refreshSettings() {
+        _showRawData.value = prefs.getBoolean(pKey(KEY_SHOW_RAW), true)
+        _enableLogging.value = prefs.getBoolean(pKey(KEY_LOGGING), true)
+        _enableVoicePrompts.value = prefs.getBoolean(pKey(KEY_VOICE), true)
+        _showMotorStatus.value = prefs.getBoolean(pKey(KEY_SHOW_MOTOR_STATUS), false)
+        _steerScale.value = prefs.getInt(pKey(KEY_STEER_SCALE), 200)
+        _backLashTime.value = prefs.getInt(pKey(KEY_BACKLASH_TIME), 250)
+        _qmcLpfEnabled.value = prefs.getBoolean(pKey(KEY_QMC_LPF), false)
+        _useKalmanFilter.value = prefs.getBoolean(pKey(KEY_SF_USE_KALMAN), false)
+        _isSlaveMode.value = prefs.getBoolean(pKey(KEY_SLAVE_MODE), false)
+        _steerSensorType.value = SteerSensorType.valueOf(
+            prefs.getString(pKey(KEY_STEER_SENSOR_TYPE), SteerSensorType.QMC6308.name) ?: SteerSensorType.QMC6308.name
+        )
+        _scanAllNames.value = prefs.getBoolean(pKey(KEY_SCAN_ALL), false)
+        
+        _declination.value = prefs.getFloat(pKey(KEY_DECLINATION), 0f)
+        _headingOffset.value = prefs.getFloat(pKey(KEY_HEADING_OFFSET), 0f)
+        _magCalibZeroDeg.value = prefs.getFloat(pKey(KEY_MAG_CALIB_ZERO_DEG), 0f)
+        _magCalibPortDeg.value = prefs.getFloat(pKey(KEY_MAG_CALIB_PORT_DEG), 0f)
+        _magCalibStbdDeg.value = prefs.getFloat(pKey(KEY_MAG_CALIB_STBD_DEG), 0f)
+
+        _apKp.value = prefs.getFloat(pKey(KEY_AP_KP), DEFAULT_AP_KP)
+        _apKi.value = prefs.getFloat(pKey(KEY_AP_KI), DEFAULT_AP_KI)
+        _apKd.value = prefs.getFloat(pKey(KEY_AP_KD), DEFAULT_AP_KD)
+        _apDeadband.value = prefs.getFloat(pKey(KEY_AP_DEADBAND), DEFAULT_AP_DEADBAND)
+        _apMaxRate.value = prefs.getFloat(pKey(KEY_AP_MAX_RATE), DEFAULT_AP_MAX_RATE)
+        _apDelay.value = prefs.getLong(pKey(KEY_AP_DELAY), DEFAULT_AP_DELAY)
+        _useRudderSensor.value = prefs.getBoolean(pKey(KEY_USE_RUDDER_SENSOR), false)
+
+        _magEllipseResult.value = loadMagEllipse()
+        
+        steerProcessor.is1DMode = (_steerSensorType.value == SteerSensorType.VL53L0X)
+        _magEllipseResult.value?.let { res ->
+            steerProcessor.setEllipse(res.centerX, res.centerY, res.axisA, res.axisB, res.angle)
+        }
+
+        loadSensorFusionOffsets()
+        loadSteerCalib()
+        
+        BleRepository.setWaypoints(loadWaypoints())
+        
+        // Sync to Repository
+        BleRepository.apKp = _apKp.value
+        BleRepository.apKi = _apKi.value
+        BleRepository.apKd = _apKd.value
+        BleRepository.apDeadband = _apDeadband.value
+        BleRepository.maxTurnRate = _apMaxRate.value
+        BleRepository.autoPilotDelay = _apDelay.value
+        BleRepository.useRudderSensor = _useRudderSensor.value
+        BleRepository.steerScale = _steerScale.value
+        BleRepository.backLashTime = _backLashTime.value
+        BleRepository.enableVoicePrompts = _enableVoicePrompts.value
+        BleRepository.showMotorStatus = _showMotorStatus.value
+        BleRepository.slaveMode.value = _isSlaveMode.value
+        
+        sensorFusion.useKalman = _useKalmanFilter.value
+        sensorFusion.setDeclination(_declination.value)
+    }
+
+    fun setBoatProfile(profile: BoatProfile) {
+        if (_currentProfile.value == profile) return
+        _currentProfile.value = profile
+        prefs.edit().putString(KEY_CURRENT_PROFILE, profile.name).apply()
+        refreshSettings()
+        speak("Profile ${profile.name}")
+    }
+
     private fun loadSensorFusionOffsets() {
-        sensorFusion.manualCalHardIronX = prefs.getFloat(KEY_SF_MAG_BIAS_X, 0f)
-        sensorFusion.manualCalHardIronY = prefs.getFloat(KEY_SF_MAG_BIAS_Y, 0f)
-        sensorFusion.gyroBiasX = prefs.getFloat(KEY_SF_GYRO_BIAS_X, 0f)
-        sensorFusion.gyroBiasY = prefs.getFloat(KEY_SF_GYRO_BIAS_Y, 0f)
-        sensorFusion.gyroBiasZ = prefs.getFloat(KEY_SF_GYRO_BIAS_Z, 0f)
-        sensorFusion.useKalman = prefs.getBoolean(KEY_SF_USE_KALMAN, false)
+        sensorFusion.manualCalHardIronX = prefs.getFloat(pKey(KEY_SF_MAG_BIAS_X), 0f)
+        sensorFusion.manualCalHardIronY = prefs.getFloat(pKey(KEY_SF_MAG_BIAS_Y), 0f)
+        sensorFusion.gyroBiasX = prefs.getFloat(pKey(KEY_SF_GYRO_BIAS_X), 0f)
+        sensorFusion.gyroBiasY = prefs.getFloat(pKey(KEY_SF_GYRO_BIAS_Y), 0f)
+        sensorFusion.gyroBiasZ = prefs.getFloat(pKey(KEY_SF_GYRO_BIAS_Z), 0f)
+        sensorFusion.useKalman = prefs.getBoolean(pKey(KEY_SF_USE_KALMAN), false)
     }
 
     private fun loadSteerCalib() {
-        val data = prefs.getString(KEY_CALIB_POINTS, null)
+        val data = prefs.getString(pKey(KEY_CALIB_POINTS), null)
+        steerProcessor.clearCalibrationPoints()
         if (data != null) {
             try {
-                steerProcessor.clearCalibrationPoints()
                 data.split(";").filter { it.isNotBlank() }.forEach { entry ->
                     val pts = entry.split(",")
                     if (pts.size == 3) {
@@ -351,18 +431,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun setupSync() {
         viewModelScope.launch { BleRepository.targetHeading.collect { sensorFusion.resetFilter() } }
-        // Feed initial values to Repository
-        BleRepository.apKp = _apKp.value
-        BleRepository.apKi = _apKi.value
-        BleRepository.apKd = _apKd.value
-        BleRepository.apDeadband = _apDeadband.value
-        BleRepository.maxTurnRate = _apMaxRate.value
-        BleRepository.autoPilotDelay = _apDelay.value
-        BleRepository.useRudderSensor = _useRudderSensor.value
-        BleRepository.steerScale = _steerScale.value
-        BleRepository.enableVoicePrompts = _enableVoicePrompts.value
-        BleRepository.showMotorStatus = _showMotorStatus.value
-        BleRepository.slaveMode.value = _isSlaveMode.value
         
         viewModelScope.launch { trueHeading.collect { BleRepository.trueHeading.value = it } }
         viewModelScope.launch { rudderPosition.collect { BleRepository.rudderPosition.value = it } }
@@ -482,7 +550,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val decl = GeomagneticField(lat.toFloat(), lon.toFloat(), 0f, System.currentTimeMillis()).declination
                 if (abs(_declination.value - decl) > 0.1f) {
                     _declination.value = decl
-                    prefs.edit().putFloat(KEY_DECLINATION, decl).apply()
+                    prefs.edit().putFloat(pKey(KEY_DECLINATION), decl).apply()
                     sensorFusion.setDeclination(decl)
                 }
 
@@ -527,7 +595,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         // Initialize declination from prefs
-        sensorFusion.setDeclination(prefs.getFloat(KEY_DECLINATION, 0f))
+        sensorFusion.setDeclination(prefs.getFloat(pKey(KEY_DECLINATION), 0f))
         sensorFusion.useKalman = _useKalmanFilter.value
 
         val processA1: (ByteArray) -> Unit = { frame ->
@@ -581,7 +649,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val co = _headingOffset.value
                     var diff = to - co; while (diff > 180f) diff -= 360f; while (diff < -180f) diff += 360f
                     val no = co + (diff * 0.001f)
-                    if (abs(no - co) > 0.0001f) { _headingOffset.value = no; prefs.edit().putFloat(KEY_HEADING_OFFSET, no).apply() }
+                    if (abs(no - co) > 0.0001f) { _headingOffset.value = no; prefs.edit().putFloat(pKey(KEY_HEADING_OFFSET), no).apply() }
                 }
             }
         }
@@ -645,7 +713,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val d = GeomagneticField(loc.latitude.toFloat(), loc.longitude.toFloat(), loc.altitude.toFloat(), System.currentTimeMillis()).declination
             if (abs(_declination.value - d) > 0.1f) {
                 _declination.value = d
-                prefs.edit().putFloat(KEY_DECLINATION, d).apply()
+                prefs.edit().putFloat(pKey(KEY_DECLINATION), d).apply()
                 sensorFusion.setDeclination(d)
             }
         }
@@ -654,7 +722,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopGpsUpdates() { fusedLocationClient.removeLocationUpdates(locationCallback); _gpsFix.value = false }
     fun startScan() = scanner.startScan(_scanAllNames.value)
     fun startRemoteScan() = scanner.startRemoteScan(); fun startImuScan() = scanner.startImuScan(); fun startGpsScan() = scanner.startGpsScan()
-    fun stopScan() = scanner.stopScan(); fun setScanAllNames(all: Boolean) { _scanAllNames.value = all }
+    fun stopScan() = scanner.stopScan(); fun setScanAllNames(all: Boolean) { 
+        _scanAllNames.value = all
+        prefs.edit().putBoolean(pKey(KEY_SCAN_ALL), all).apply()
+    }
 
     fun connect(disc: DiscoveredDevice) {
         viewModelScope.launch {
@@ -671,19 +742,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setShowRawData(s: Boolean) { _showRawData.value = s; motorManager.setRawDataEnabled(s); imuManager.setRawDataEnabled(s); gpsManager.setRawDataEnabled(s); prefs.edit().putBoolean(KEY_SHOW_RAW, s).apply() }
-    fun setEnableLogging(e: Boolean) { _enableLogging.value = e; motorManager.setLoggingEnabled(e); imuManager.setLoggingEnabled(e); gpsManager.setLoggingEnabled(e); prefs.edit().putBoolean(KEY_LOGGING, e).apply() }
-    fun setEnableVoicePrompts(e: Boolean) = prefs.edit().putBoolean(KEY_VOICE, e).apply().also { _enableVoicePrompts.value = e; BleRepository.enableVoicePrompts = e }
-    fun setShowMotorStatus(s: Boolean) = prefs.edit().putBoolean(KEY_SHOW_MOTOR_STATUS, s).apply().also { _showMotorStatus.value = s; BleRepository.showMotorStatus = s }
-    fun setSteerScale(s: Int) = prefs.edit().putInt(KEY_STEER_SCALE, s).apply().also { _steerScale.value = s; BleRepository.steerScale = s }
-    fun setQmcLpfEnabled(e: Boolean) = prefs.edit().putBoolean(KEY_QMC_LPF, e).apply().also { _qmcLpfEnabled.value = e }
-    fun setUseKalmanFilter(v: Boolean) { _useKalmanFilter.value = v; sensorFusion.useKalman = v; prefs.edit().putBoolean(KEY_SF_USE_KALMAN, v).apply(); sensorFusion.resetFilter(); speak("Kalman filter ${if(v) "enabled" else "disabled"}") }
-    fun setSlaveMode(s: Boolean) = prefs.edit().putBoolean(KEY_SLAVE_MODE, s).apply().also { _isSlaveMode.value = s; BleRepository.slaveMode.value = s; speak("Slave mode ${if(s) "on" else "off"}") }
+    fun setShowRawData(s: Boolean) { _showRawData.value = s; motorManager.setRawDataEnabled(s); imuManager.setRawDataEnabled(s); gpsManager.setRawDataEnabled(s); prefs.edit().putBoolean(pKey(KEY_SHOW_RAW), s).apply() }
+    fun setEnableLogging(e: Boolean) { _enableLogging.value = e; motorManager.setLoggingEnabled(e); imuManager.setLoggingEnabled(e); gpsManager.setLoggingEnabled(e); prefs.edit().putBoolean(pKey(KEY_LOGGING), e).apply() }
+    fun setEnableVoicePrompts(e: Boolean) = prefs.edit().putBoolean(pKey(KEY_VOICE), e).apply().also { _enableVoicePrompts.value = e; BleRepository.enableVoicePrompts = e }
+    fun setShowMotorStatus(s: Boolean) = prefs.edit().putBoolean(pKey(KEY_SHOW_MOTOR_STATUS), s).apply().also { _showMotorStatus.value = s; BleRepository.showMotorStatus = s }
+    fun setSteerScale(s: Int) = prefs.edit().putInt(pKey(KEY_STEER_SCALE), s).apply().also { _steerScale.value = s; BleRepository.steerScale = s }
+    fun setBackLashTime(v: Int) { _backLashTime.value = v; prefs.edit().putInt(pKey(KEY_BACKLASH_TIME), v).apply(); BleRepository.backLashTime = v }
+    fun setQmcLpfEnabled(e: Boolean) = prefs.edit().putBoolean(pKey(KEY_QMC_LPF), e).apply().also { _qmcLpfEnabled.value = e }
+    fun setUseKalmanFilter(v: Boolean) { _useKalmanFilter.value = v; sensorFusion.useKalman = v; prefs.edit().putBoolean(pKey(KEY_SF_USE_KALMAN), v).apply(); sensorFusion.resetFilter(); speak("Kalman filter ${if(v) "enabled" else "disabled"}") }
+    fun setSlaveMode(s: Boolean) = prefs.edit().putBoolean(pKey(KEY_SLAVE_MODE), s).apply().also { _isSlaveMode.value = s; BleRepository.slaveMode.value = s; speak("Slave mode ${if(s) "on" else "off"}") }
 
     fun setSteerSensorType(type: SteerSensorType) {
         _steerSensorType.value = type
         steerProcessor.is1DMode = (type == SteerSensorType.VL53L0X)
-        prefs.edit().putString(KEY_STEER_SENSOR_TYPE, type.name).apply()
+        prefs.edit().putString(pKey(KEY_STEER_SENSOR_TYPE), type.name).apply()
         loadSteerCalib()
         speak("Steer sensor ${type.name}")
     }
@@ -699,7 +771,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 Log.e(TAG, "Connect failed", e)
             }
         }
-        prefs.edit().putString(KEY_REMOTE_MAC, address).apply()
+        prefs.edit().putString(pKey(KEY_REMOTE_MAC), address).apply()
     }
 
     fun disconnect() { motorManager.disconnectDevice(); imuManager.disconnectDevice(); gpsManager.disconnectDevice() }
@@ -714,7 +786,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val norm = magCalibrator.normalize(_magX.value.toFloat(), _magY.value.toFloat(), res)
                 val deg = Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
                 _magCalibZeroDeg.value = deg
-                prefs.edit().putFloat(KEY_MAG_CALIB_ZERO_DEG, deg).apply()
+                prefs.edit().putFloat(pKey(KEY_MAG_CALIB_ZERO_DEG), deg).apply()
             }
         }
         saveSteerCalib()
@@ -729,7 +801,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val norm = magCalibrator.normalize(_magX.value.toFloat(), _magY.value.toFloat(), res)
                 val deg = Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
                 _magCalibPortDeg.value = deg
-                prefs.edit().putFloat(KEY_MAG_CALIB_PORT_DEG, deg).apply()
+                prefs.edit().putFloat(pKey(KEY_MAG_CALIB_PORT_DEG), deg).apply()
             }
         }
         saveSteerCalib()
@@ -744,7 +816,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val norm = magCalibrator.normalize(_magX.value.toFloat(), _magY.value.toFloat(), res)
                 val deg = Math.toDegrees(atan2(norm.second.toDouble(), norm.first.toDouble())).toFloat()
                 _magCalibStbdDeg.value = deg
-                prefs.edit().putFloat(KEY_MAG_CALIB_STBD_DEG, deg).apply()
+                prefs.edit().putFloat(pKey(KEY_MAG_CALIB_STBD_DEG), deg).apply()
             }
         }
         saveSteerCalib()
@@ -761,13 +833,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearSteerCalib() {
         steerProcessor.clearCalibrationPoints()
-        prefs.edit().remove(KEY_CALIB_POINTS).apply()
+        prefs.edit().remove(pKey(KEY_CALIB_POINTS)).apply()
     }
 
     private fun saveSteerCalib() {
         val points = steerProcessor.getCalibrationPoints()
         val data = points.joinToString(";") { "${it.first},${it.second},${it.third}" }
-        prefs.edit().putString(KEY_CALIB_POINTS, data).apply()
+        prefs.edit().putString(pKey(KEY_CALIB_POINTS), data).apply()
     }
 
     fun startMagEllipseCalib() { magCalibrator.clear(); _isMagCalibrating.value = true }
@@ -778,13 +850,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun saveMagEllipseCalib() {
         val res = _magEllipseResult.value ?: return
-        prefs.edit().putFloat(KEY_MAG_ELLIPSE_CX, res.centerX).putFloat(KEY_MAG_ELLIPSE_CY, res.centerY).putFloat(KEY_MAG_ELLIPSE_A, res.axisA).putFloat(KEY_MAG_ELLIPSE_B, res.axisB).putFloat(KEY_MAG_ELLIPSE_ANGLE, res.angle).putBoolean(KEY_MAG_ELLIPSE_VALID, true).apply()
+        prefs.edit().putFloat(pKey(KEY_MAG_ELLIPSE_CX), res.centerX).putFloat(pKey(KEY_MAG_ELLIPSE_CY), res.centerY).putFloat(pKey(KEY_MAG_ELLIPSE_A), res.axisA).putFloat(pKey(KEY_MAG_ELLIPSE_B), res.axisB).putFloat(pKey(KEY_MAG_ELLIPSE_ANGLE), res.angle).putBoolean(pKey(KEY_MAG_ELLIPSE_VALID), true).apply()
     }
-    fun clearMagEllipseCalib() { _magEllipseResult.value = null; prefs.edit().remove(KEY_MAG_ELLIPSE_CX).apply() }
+    fun clearMagEllipseCalib() { _magEllipseResult.value = null; prefs.edit().remove(pKey(KEY_MAG_ELLIPSE_CX)).apply() }
 
     private fun loadMagEllipse(): MagEllipseCalibrator.Result? {
-        if (!prefs.contains(KEY_MAG_ELLIPSE_CX)) return null
-        return MagEllipseCalibrator.Result(prefs.getFloat(KEY_MAG_ELLIPSE_CX, 0f), prefs.getFloat(KEY_MAG_ELLIPSE_CY, 0f), prefs.getFloat(KEY_MAG_ELLIPSE_A, 1f), prefs.getFloat(KEY_MAG_ELLIPSE_B, 1f), prefs.getFloat(KEY_MAG_ELLIPSE_ANGLE, 0f))
+        if (!prefs.contains(pKey(KEY_MAG_ELLIPSE_CX))) return null
+        return MagEllipseCalibrator.Result(
+            prefs.getFloat(pKey(KEY_MAG_ELLIPSE_CX), 0f),
+            prefs.getFloat(pKey(KEY_MAG_ELLIPSE_CY), 0f),
+            prefs.getFloat(pKey(KEY_MAG_ELLIPSE_A), 1f),
+            prefs.getFloat(pKey(KEY_MAG_ELLIPSE_B), 1f),
+            prefs.getFloat(pKey(KEY_MAG_ELLIPSE_ANGLE), 0f)
+        )
     }
 
     fun resetSFDegrees() {
@@ -803,8 +881,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (sensorFusion.finishManualMagCal()) {
             _isSFusionMagCalibrating.value = false
             _sfMagCalStatus.value = "Calibrated: X=${"%.0f".format(sensorFusion.manualCalHardIronX)} Y=${"%.0f".format(sensorFusion.manualCalHardIronY)}"
-            prefs.edit().putFloat(KEY_SF_MAG_BIAS_X, sensorFusion.manualCalHardIronX)
-                .putFloat(KEY_SF_MAG_BIAS_Y, sensorFusion.manualCalHardIronY).apply()
+            prefs.edit().putFloat(pKey(KEY_SF_MAG_BIAS_X), sensorFusion.manualCalHardIronX)
+                .putFloat(pKey(KEY_SF_MAG_BIAS_Y), sensorFusion.manualCalHardIronY).apply()
             speak("Heading calibration complete")
         } else {
             _isSFusionMagCalibrating.value = false
@@ -823,9 +901,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (sensorFusion.finishGyroBiasCal()) {
             _isSFusionGyroCalibrating.value = false
             _sfGyroCalStatus.value = "Calibrated: Z=${"%.3f".format(sensorFusion.gyroBiasZ)}"
-            prefs.edit().putFloat(KEY_SF_GYRO_BIAS_X, sensorFusion.gyroBiasX)
-                .putFloat(KEY_SF_GYRO_BIAS_Y, sensorFusion.gyroBiasY)
-                .putFloat(KEY_SF_GYRO_BIAS_Z, sensorFusion.gyroBiasZ).apply()
+            prefs.edit().putFloat(pKey(KEY_SF_GYRO_BIAS_X), sensorFusion.gyroBiasX)
+                .putFloat(pKey(KEY_SF_GYRO_BIAS_Y), sensorFusion.gyroBiasY)
+                .putFloat(pKey(KEY_SF_GYRO_BIAS_Z), sensorFusion.gyroBiasZ).apply()
             speak("Gyro calibration complete")
         } else {
             _isSFusionGyroCalibrating.value = false
@@ -834,10 +912,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun loadWaypoints() = prefs.getString(KEY_WAYPOINTS, null)?.split(";")?.filter { it.isNotBlank() }?.map {
+    private fun loadWaypoints() = prefs.getString(pKey(KEY_WAYPOINTS), null)?.split(";")?.filter { it.isNotBlank() }?.map {
         it.split(",").let { pts -> Waypoint(pts[0], GeoPoint(pts[1].toDouble(), pts[2].toDouble())) }
     } ?: emptyList()
-    private fun saveWaypoints(points: List<Waypoint>) = prefs.edit().putString(KEY_WAYPOINTS, points.joinToString(";") { "${it.name},${it.point.latitude},${it.point.longitude}" }).apply()
+    
+    private fun saveWaypoints(points: List<Waypoint>) = prefs.edit().putString(pKey(KEY_WAYPOINTS), points.joinToString(";") { "${it.name},${it.point.latitude},${it.point.longitude}" }).apply()
 
     fun saveLocation(name: String) = (targetLocation.value ?: currentLocation.value)?.let { loc ->
         val updated = waypoints.value.toMutableList().apply { add(Waypoint(name, loc)) }
@@ -855,13 +934,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun clearWaypoints() = BleRepository.setWaypoints(emptyList()).also { saveWaypoints(emptyList()); BleRepository.setTarget(null, null); speak("Cleared") }
     fun setTargetLocation(loc: GeoPoint?, name: String? = null) = BleRepository.setTarget(loc, name).also { if (loc != null) speak("Target set") }
 
-    fun setApKp(v: Float) { _apKp.value = v; prefs.edit().putFloat(KEY_AP_KP, v).apply(); BleRepository.apKp = v }
-    fun setApKi(v: Float) { _apKi.value = v; prefs.edit().putFloat(KEY_AP_KI, v).apply(); BleRepository.apKi = v }
-    fun setApKd(v: Float) { _apKd.value = v; prefs.edit().putFloat(KEY_AP_KD, v).apply(); BleRepository.apKd = v }
-    fun setApDeadband(v: Float) { _apDeadband.value = v; prefs.edit().putFloat(KEY_AP_DEADBAND, v).apply(); BleRepository.apDeadband = v }
-    fun setApMaxRate(v: Float) { _apMaxRate.value = v; prefs.edit().putFloat(KEY_AP_MAX_RATE, v).apply(); BleRepository.maxTurnRate = v }
-    fun setApDelay(v: Long) { _apDelay.value = v; prefs.edit().putLong(KEY_AP_DELAY, v).apply(); BleRepository.autoPilotDelay = v }
-    fun setUseRudderSensor(v: Boolean) { _useRudderSensor.value = v; prefs.edit().putBoolean(KEY_USE_RUDDER_SENSOR, v).apply(); BleRepository.useRudderSensor = v }
+    fun setApKp(v: Float) { _apKp.value = v; prefs.edit().putFloat(pKey(KEY_AP_KP), v).apply(); BleRepository.apKp = v }
+    fun setApKi(v: Float) { _apKi.value = v; prefs.edit().putFloat(pKey(KEY_AP_KI), v).apply(); BleRepository.apKi = v }
+    fun setApKd(v: Float) { _apKd.value = v; prefs.edit().putFloat(pKey(KEY_AP_KD), v).apply(); BleRepository.apKd = v }
+    fun setApDeadband(v: Float) { _apDeadband.value = v; prefs.edit().putFloat(pKey(KEY_AP_DEADBAND), v).apply(); BleRepository.apDeadband = v }
+    fun setApMaxRate(v: Float) { _apMaxRate.value = v; prefs.edit().putFloat(pKey(KEY_AP_MAX_RATE), v).apply(); BleRepository.maxTurnRate = v }
+    fun setApDelay(v: Long) { _apDelay.value = v; prefs.edit().putLong(pKey(KEY_AP_DELAY), v).apply(); BleRepository.autoPilotDelay = v }
+    fun setUseRudderSensor(v: Boolean) { _useRudderSensor.value = v; prefs.edit().putBoolean(pKey(KEY_USE_RUDDER_SENSOR), v).apply(); BleRepository.useRudderSensor = v }
 
     // Helper methods for reading BLE data
     private fun readS16LE(data: ByteArray, offset: Int): Int {

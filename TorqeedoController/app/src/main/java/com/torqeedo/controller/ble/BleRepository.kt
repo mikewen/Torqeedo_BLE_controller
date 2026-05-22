@@ -66,6 +66,7 @@ object BleRepository : TextToSpeech.OnInitListener {
     var autoIncrementDelay = 200L
     var throttleDelay = 200L
     var steerScale = 200
+    var backLashTime = 250
     var apKp = 2.5f
     var apKi = 0.1f
     var apKd = 1.0f
@@ -324,7 +325,8 @@ object BleRepository : TextToSpeech.OnInitListener {
         autoAdjustmentJob = null
     }
 
-    // Track the last physical direction: 1 = positive/right, -1 = negative/left, 0 = stopped
+    // Track the last physical directi
+    // on: 1 = positive/right, -1 = negative/left, 0 = stopped
     private var lastMotorDirection = 0
     private fun takeUpBacklash(direction: Int) {
         //if (!useRudderSensor) return
@@ -385,13 +387,13 @@ object BleRepository : TextToSpeech.OnInitListener {
             val currentDirection = if (delta > 0) 1 else -1
             var runtimeMs = abs(delta) * customScale
 
-            // If we switched directions, add a 250ms "kick" to take up the gear slack
+            // If we switched directions, add a "kick" to take up the gear slack
             if (lastMotorDirection != 0 && currentDirection != lastMotorDirection) {
                 //runtimeMs += 250 // Adjust this number (100 to 200) based on live testing
                 if (useRudderSensor&&(autoPilotJob?.isActive == true)){
                     takeUpBacklash(currentDirection)
                 }else{
-                    //runtimeMs += 250
+                    runtimeMs += backLashTime
                 }
             }
 

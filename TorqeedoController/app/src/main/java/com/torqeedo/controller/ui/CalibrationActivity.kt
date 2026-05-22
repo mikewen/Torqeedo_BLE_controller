@@ -57,6 +57,17 @@ class CalibrationActivity : AppCompatActivity() {
             }
         }
 
+        // Backlash Time
+        binding.btnSetBacklash.setOnClickListener {
+            val ms = binding.etBacklashTime.text.toString().toIntOrNull()
+            if (ms != null) {
+                vm.setBackLashTime(ms)
+                showSnack("Backlash time set to $ms ms")
+            } else {
+                showSnack("Invalid backlash time")
+            }
+        }
+
         // Mag Ellipse Calibration (Steering - QMC Only)
         binding.btnStartMagEllipse.setOnClickListener {
             vm.startMagEllipseCalib()
@@ -203,16 +214,15 @@ class CalibrationActivity : AppCompatActivity() {
                 launch {
                     vm.magZ.collectLatest { z -> binding.tvMagZ.text = "Z: $z" }
                 }
-//                launch {
-//                    vm.vl53l0xDistance.collectLatest { dist ->
-//                        binding.tvVl53Distance.text = "Distance: $dist mm"
-//                    }
-//                }
-//                launch {
-//                    vm.rawVl53Frame.collectLatest { frame ->
-//                        binding.tvRawVl53.text = "Raw: " + (frame?.joinToString(" ") { "%02X".format(it) } ?: "--")
-//                    }
-//                }
+                
+                launch {
+                    vm.backLashTime.collectLatest { ms ->
+                        if (binding.etBacklashTime.text.toString() != ms.toString()) {
+                            binding.etBacklashTime.setText(ms.toString())
+                        }
+                    }
+                }
+
                 launch {
                     combine(vm.rawMagAngle, vm.magRudderPercentage, vm.vl53l0xDistance, vm.steerSensorType) { angle, percent, dist, type ->
                         if (type == SteerSensorType.QMC6308) {
