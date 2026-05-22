@@ -71,7 +71,7 @@ object BleRepository : TextToSpeech.OnInitListener {
     var apKd = 1.0f
     var apDeadband = 3.0f
     var maxTurnRate = 12f
-    var autoPilotDelay = 200L
+    var autoPilotDelay = 500L
     var useRudderSensor = false
     var showMotorStatus = false
     var enableVoicePrompts = true
@@ -324,6 +324,87 @@ object BleRepository : TextToSpeech.OnInitListener {
         autoAdjustmentJob = null
     }
 
+    // Track the last physical direction: 1 = positive/right, -1 = negative/left, 0 = stopped
+    private var lastMotorDirection = 0
+    private fun takeUpBacklash(direction: Int) {
+        //if (!useRudderSensor) return
+        val startPos = rudderPosition.value
+        val startTime = System.currentTimeMillis()
+
+        while (System.currentTimeMillis() - startTime < 400) {
+
+            motorManager?.sendSteer(direction, 100)
+            Thread.sleep(20)
+
+            val movement = (rudderPosition.value - startPos) * direction
+
+            if (movement > 1.0f) {
+                break
+            }
+        }
+        motorManager?.sendSteer(0, 0)
+    }
+    private fun executeSteerChange(targetValue: Int, customScale: Int) {
+        val clampedTarget = targetValue.coerceIn(-STEER_MAX, STEER_MAX)
+        val oldValue = steerValue.value
+        var delta = clampedTarget - oldValue
+
+        if (delta == 0) return
+
+        // 1. Safety Look-Ahead Capping
+        if (useRudderSensor) {
+            val currentPos = rudderPosition.value
+            val predictedPos = currentPos + delta
+
+            if (predictedPos > 99f) {
+                delta = (99f - currentPos).toInt().coerceAtLeast(0)
+            } else if (predictedPos < -99f) {
+                delta = (-99f - currentPos).toInt().coerceAtMost(0)
+            }
+        }
+
+        // 2. Soft Stop Cushioning Zone
+        if (abs(rudderPosition.value) > 70f) {
+            delta = delta.coerceIn(-5, 5)
+        }
+
+        // 3. Final Verification
+        if (delta == 0) {
+            motorManager?.sendSteer(0, 0)
+            lastMotorDirection = 0 // Reset direction tracking on stop
+            return
+        }
+
+        val newValue = (oldValue + delta).coerceIn(-STEER_MAX, STEER_MAX)
+        if (newValue != oldValue) {
+            steerValue.value = newValue
+
+            // --------------------------------------------------
+            // BACKLASH COMPENSATION (THE KICK)
+            // --------------------------------------------------
+            val currentDirection = if (delta > 0) 1 else -1
+            var runtimeMs = abs(delta) * customScale
+
+            // If we switched directions, add a 250ms "kick" to take up the gear slack
+            if (lastMotorDirection != 0 && currentDirection != lastMotorDirection) {
+                //runtimeMs += 250 // Adjust this number (100 to 200) based on live testing
+                if (useRudderSensor){
+                    takeUpBacklash(currentDirection)
+                }else{
+                    runtimeMs += 250
+                }
+            }
+
+            // Update the direction history tracking
+            lastMotorDirection = currentDirection
+
+            // 4. Hardware Dispatch
+            motorManager?.sendSteer(delta, runtimeMs)
+        }
+    }
+
+
+    /*
     fun setSteerValue(value: Int) {
         val clamped = value.coerceIn(-STEER_MAX, STEER_MAX)
         val oldValue = steerValue.value
@@ -381,6 +462,19 @@ object BleRepository : TextToSpeech.OnInitListener {
             val runtimeMs = abs(actualDelta) * steerScale
             motorManager?.sendSteer(actualDelta, runtimeMs)
         }
+    }
+    */
+
+    // Absolute Target Input (Used when your autopilot loop runs WITHOUT a rudder sensor)
+    // Absolute Target Input (Accepts an optional custom scale)
+    fun setSteerValue(value: Int, customScale: Int = steerScale) {
+        executeSteerChange(targetValue = value, customScale = customScale)
+    }
+
+    // Relative Step Input (Accepts an optional custom scale, defaulting to remote scale)
+    fun adjustSteer(delta: Int, customScale: Int = steerScale) {
+        val targetValue = steerValue.value + delta
+        executeSteerChange(targetValue = targetValue, customScale = customScale)
     }
 
     fun startSteerRepeat(delta: Int) {
@@ -526,38 +620,37 @@ object BleRepository : TextToSpeech.OnInitListener {
 
     private suspend fun syncRudderToTarget(target: Float) {
         val RUDDER_LIMIT = 80f
-        //todo: add turn off linear motor when target is reached or AP is turned off by sending steer command with timeMS=0
-        val maxAttempts = 5
-        for (i in 0 until maxAttempts) {
-            // Allow exit if AP is turned off, unless we are resetting to zero
-            if (!autoPilotActive.value && target != 0f) {
-                motorManager?.sendSteer(0, 0)
-                break
-            }
-            
-            val currentRudderPos = rudderPosition.value
 
-            // Safety: stop if already at limit in the desired direction
-            //if (currentRudderPos >= 99f && target > currentRudderPos) break
-            //if (currentRudderPos <= -99f && target < currentRudderPos) break
-            if (abs(currentRudderPos) >= RUDDER_LIMIT) {
-                motorManager?.sendSteer(0, 0) //stopSteering, send Steer command with timeMS=0
-                break
-            }
-
-            val rudderError = target - currentRudderPos
-
-            if (abs(rudderError) < 1.5f) break
-
-            val step = if (rudderError > 0) 1 else -1
-            adjustSteer(step)
-            
-            // Trigger status query to get faster sensor update
-            //motorManager?.sendSteerStatusQuery()  // comment out, sensor update is fixed rate
-            
-            // Is delay here useful or harmful?
-            delay(50)
+        // Allow exit if AP is turned off, unless we are resetting to zero
+        if (!autoPilotActive.value && target != 0f) {
+            motorManager?.sendSteer(0, 0)
+            return // Use return instead of break since the loop is gone
         }
+
+        val currentRudderPos = rudderPosition.value
+
+        // Safety: stop if already at limit
+        if (abs(currentRudderPos) >= RUDDER_LIMIT) {
+            motorManager?.sendSteer(0, 0)
+            return
+        }
+
+        val rudderError = target - currentRudderPos
+        if (abs(rudderError) < 1.5f) {
+            motorManager?.sendSteer(0, 0) // Target reached, explicitly cut power
+            return
+        }
+
+        // FIX: Calculate the proportional step size directly
+        val proportionalStep = (rudderError * 1.5f).toInt()
+        val maxStepPerCycle = 25
+
+        // Declare 'step' only ONCE here as a val
+        val step = proportionalStep.coerceIn(-maxStepPerCycle, maxStepPerCycle)
+
+        // Hardware scale optimized for 5Hz loops: Max 25 steps * 20ms = 500ms run time
+        val autopilotSteerScale = 20
+        adjustSteer(step, customScale = autopilotSteerScale)
     }
 
     private suspend fun updateAutoPilot() {
