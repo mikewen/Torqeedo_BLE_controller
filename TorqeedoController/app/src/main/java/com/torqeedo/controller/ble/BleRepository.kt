@@ -352,7 +352,7 @@ object BleRepository : TextToSpeech.OnInitListener {
         if (delta == 0) return
 
         // 1. Safety Look-Ahead Capping
-        if (useRudderSensor) {
+        if (useRudderSensor&&(autoPilotJob?.isActive == true)) {
             val currentPos = rudderPosition.value
             val predictedPos = currentPos + delta
 
@@ -388,10 +388,10 @@ object BleRepository : TextToSpeech.OnInitListener {
             // If we switched directions, add a 250ms "kick" to take up the gear slack
             if (lastMotorDirection != 0 && currentDirection != lastMotorDirection) {
                 //runtimeMs += 250 // Adjust this number (100 to 200) based on live testing
-                if (useRudderSensor){
+                if (useRudderSensor&&(autoPilotJob?.isActive == true)){
                     takeUpBacklash(currentDirection)
                 }else{
-                    runtimeMs += 250
+                    //runtimeMs += 250
                 }
             }
 
