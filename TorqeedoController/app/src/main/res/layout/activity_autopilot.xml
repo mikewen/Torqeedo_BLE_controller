@@ -236,7 +236,7 @@
                         android:textColor="@color/text_secondary"
                         android:textSize="14sp"
                         android:layout_marginTop="12dp"
-                        android:gravity="center"/>
+                        android:gravity="center" />
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
@@ -255,7 +255,7 @@
                     android:layout_height="64dp"
                     android:layout_weight="1"
                     android:text="-10°"
-                    android:layout_marginEnd="4dp"/>
+                    android:layout_marginEnd="4dp" />
 
                 <Button
                     android:id="@+id/btnHdgMinus1"
@@ -264,7 +264,7 @@
                     android:layout_height="64dp"
                     android:layout_weight="1"
                     android:text="-1°"
-                    android:layout_marginEnd="8dp"/>
+                    android:layout_marginEnd="8dp" />
 
                 <Button
                     android:id="@+id/btnHdgPlus1"
@@ -273,7 +273,7 @@
                     android:layout_height="64dp"
                     android:layout_weight="1"
                     android:text="+1°"
-                    android:layout_marginStart="8dp"/>
+                    android:layout_marginStart="8dp" />
 
                 <Button
                     android:id="@+id/btnHdgPlus10"
@@ -282,7 +282,7 @@
                     android:layout_height="64dp"
                     android:layout_weight="1"
                     android:text="+10°"
-                    android:layout_marginStart="4dp"/>
+                    android:layout_marginStart="4dp" />
             </LinearLayout>
 
             <!-- Auto-Pilot Toggle -->
@@ -333,6 +333,15 @@
                             android:textColor="@color/text_secondary"
                             android:textSize="10sp" />
                     </LinearLayout>
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/swUseKalman"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="USE KALMAN FILTER"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="10sp"
+                        android:layout_marginBottom="12dp" />
 
                     <!-- Kp -->
                     <LinearLayout

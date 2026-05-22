@@ -41,6 +41,10 @@ class CalibrationActivity : AppCompatActivity() {
         binding.btnStopSFGyro.setOnClickListener { vm.stopSFusionGyroCal() }
         binding.btnResetSFDegrees.setOnClickListener { vm.resetSFDegrees() }
 
+        binding.swUseKalman.setOnCheckedChangeListener { _, isChecked ->
+            vm.setUseKalmanFilter(isChecked)
+        }
+
         // Mag Ellipse Calibration (Steering)
         binding.btnStartMagEllipse.setOnClickListener {
             vm.startMagEllipseCalib()
@@ -120,6 +124,14 @@ class CalibrationActivity : AppCompatActivity() {
                     vm.isSFusionGyroCalibrating.collectLatest { active ->
                         binding.btnStartSFGyro.isEnabled = !active
                         binding.btnStopSFGyro.isEnabled = active
+                    }
+                }
+
+                launch {
+                    vm.useKalmanFilter.collectLatest { use ->
+                        if (binding.swUseKalman.isChecked != use) {
+                            binding.swUseKalman.isChecked = use
+                        }
                     }
                 }
                 

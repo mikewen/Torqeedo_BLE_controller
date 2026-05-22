@@ -53,6 +53,10 @@ class AutoPilotActivity : AppCompatActivity() {
             vm.setUseRudderSensor(isChecked)
         }
 
+        binding.swUseKalman.setOnCheckedChangeListener { _, isChecked ->
+            vm.setUseKalmanFilter(isChecked)
+        }
+
         binding.btnOpenMap.setOnClickListener {
             startActivity(Intent(this, MapPickerActivity::class.java))
         }
@@ -235,6 +239,14 @@ class AutoPilotActivity : AppCompatActivity() {
                     vm.useRudderSensor.collectLatest { use ->
                         if (binding.swUseRudderSensor.isChecked != use) {
                             binding.swUseRudderSensor.isChecked = use
+                        }
+                    }
+                }
+
+                launch {
+                    vm.useKalmanFilter.collectLatest { use ->
+                        if (binding.swUseKalman.isChecked != use) {
+                            binding.swUseKalman.isChecked = use
                         }
                     }
                 }

@@ -404,6 +404,13 @@ class TorqeedoBleManager(private val context: Context) : BleManager(context) {
         writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue()
     }
 
+    fun sendSlaveResponse(speed: Int) {
+        val char = ae10Char ?: return
+        val frame = TorqeedoProtocol.buildSlaveResponse(speed)
+        logToFile("SEND_SLAVE_RESP", frame)
+        writeCharacteristic(char, frame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).enqueue()
+    }
+
     fun sendSteer(value: Int, runtimeMs: Int = 0) {
         val char = ae03Char ?: return
         val dir = if (value < 0) 'L' else 'R'

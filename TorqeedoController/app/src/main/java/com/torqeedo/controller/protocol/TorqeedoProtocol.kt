@@ -23,7 +23,7 @@ object TorqeedoProtocol {
     const val BATTERY_ADDR: Byte = 0x80.toByte()
     
     const val MSGID_DRIVE: Byte = 0x82.toByte()
-    const val MSGID_STATUS: Byte = 0x83.toByte() // Status query message ID
+    const val MSGID_STATUS: Byte = 0x03.toByte() // Status query message ID (MOTOR_PARAM)
 
     private const val DRIVE_FLAGS: Byte = 0x01
 
@@ -120,7 +120,7 @@ object TorqeedoProtocol {
     }
 
     // =========================
-    // CRC (only for DRIVE)
+    // CRC (Maxim/Dallas CRC-8)
     // =========================
     fun crc8Maxim(data: ByteArray, length: Int = data.size): Byte {
         var crc = 0
@@ -147,6 +147,18 @@ object TorqeedoProtocol {
         val sLo = (s and 0xFF).toByte()
         val powerPct = (abs(s) / 10).toByte()
         val raw = byteArrayOf(addr, MSGID_DRIVE, DRIVE_FLAGS, powerPct, sHi, sLo)
+        val crc = crc8Maxim(raw)
+        return byteArrayOf(HEADER, *raw, crc, FOOTER)
+    }
+
+    /**
+     * Builds the special drive response used in slave mode to reply to master polls.
+     */
+    fun buildSlaveResponse(speed: Int): ByteArray {
+        val s = speed.coerceIn(-1000, 1000)
+        val sHi = ((s shr 8) and 0xFF).toByte()
+        val sLo = (s and 0xFF).toByte()
+        val raw = byteArrayOf(0x30.toByte(), 0x82.toByte(), 0x05.toByte(), 0x00.toByte(), sHi, sLo)
         val crc = crc8Maxim(raw)
         return byteArrayOf(HEADER, *raw, crc, FOOTER)
     }
@@ -178,7 +190,9 @@ object TorqeedoProtocol {
         val voltage: Float = 0f,
         val current: Float = 0f,
         val powerW: Int = 0,
-        val tempC: Int = 0,
+        val tempC: Float = 0f,
+        val pcbTempC: Float = 0f,
+        val statorTempC: Float = 0f,
         val errorCode: Int = 0,
         val rawBytes: ByteArray = byteArrayOf(),
         val targetSpeed: Int? = null,
@@ -197,6 +211,8 @@ object TorqeedoProtocol {
             if (current != other.current) return false
             if (powerW != other.powerW) return false
             if (tempC != other.tempC) return false
+            if (pcbTempC != other.pcbTempC) return false
+            if (statorTempC != other.statorTempC) return false
             if (errorCode != other.errorCode) return false
             if (!rawBytes.contentEquals(other.rawBytes)) return false
             if (targetSpeed != other.targetSpeed) return false
@@ -210,7 +226,9 @@ object TorqeedoProtocol {
             result = 31 * result + voltage.hashCode()
             result = 31 * result + current.hashCode()
             result = 31 * result + powerW
-            result = 31 * result + tempC
+            result = 31 * result + tempC.hashCode()
+            result = 31 * result + pcbTempC.hashCode()
+            result = 31 * result + statorTempC.hashCode()
             result = 31 * result + errorCode
             result = 31 * result + rawBytes.contentHashCode()
             result = 31 * result + (targetSpeed ?: 0)
@@ -227,7 +245,10 @@ object TorqeedoProtocol {
         private var rpm: Int? = null
         private var voltage: Float? = null
         private var current: Float? = null
-        private var tempC: Int? = null
+        private var tempC: Float? = null
+        private var pcbTempC: Float? = null
+        private var statorTempC: Float? = null
+        private var powerW: Int? = null
         private var errorCode: Int? = null
         private var targetSpeed: Int? = null
         private var lastDestAddr: Byte? = null
@@ -266,9 +287,14 @@ object TorqeedoProtocol {
                 current = status.current
                 currentReceived = true
             }
-            if (!tempReceived || status.tempC != 0) {
+            if (!tempReceived || status.tempC != 0f) {
                 tempC = status.tempC
+                pcbTempC = status.pcbTempC
+                statorTempC = status.statorTempC
                 tempReceived = true
+            }
+            if (status.powerW != 0) {
+                powerW = status.powerW
             }
             if (!errorReceived || status.errorCode != 0) {
                 errorCode = status.errorCode
@@ -287,15 +313,17 @@ object TorqeedoProtocol {
 
             val v = voltage ?: 0f
             val c = current ?: 0f
-            val power = (v * c).toInt()
+            val p = powerW ?: (v * c).toInt()
             val combinedRaw = rawBytesList.flatMap { it.toList() }.toByteArray()
 
             return MotorStatus(
                 rpm = rpm ?: 0,
                 voltage = v,
                 current = c,
-                powerW = power,
-                tempC = tempC ?: 0,
+                powerW = p,
+                tempC = tempC ?: 0f,
+                pcbTempC = pcbTempC ?: 0f,
+                statorTempC = statorTempC ?: 0f,
                 errorCode = errorCode ?: 0,
                 rawBytes = combinedRaw,
                 targetSpeed = targetSpeed,
@@ -304,12 +332,11 @@ object TorqeedoProtocol {
             )
         }
 
-        fun isStale(): Boolean =
-            System.currentTimeMillis() - lastUpdate > STALE_TIMEOUT_MS
+        fun isStale(): Boolean = System.currentTimeMillis() - lastUpdate > STALE_TIMEOUT_MS
 
         fun clear() {
-            rpm = null; voltage = null; current = null
-            tempC = null; errorCode = null; targetSpeed = null
+            rpm = null; voltage = null; current = null; powerW = null
+            tempC = null; pcbTempC = null; statorTempC = null; errorCode = null; targetSpeed = null
             lastDestAddr = null; lastMsgId = null
             rpmReceived = false; voltageReceived = false
             currentReceived = false; tempReceived = false
@@ -385,8 +412,8 @@ object TorqeedoProtocol {
                 }
                 0xB1 -> {
                     // Motor Temperature - direct value, divide by 1000
-                    val tempC = raw / 1000
-                    MotorStatus(tempC = tempC, rawBytes = frame)
+                    val tempC = raw / 1000.0f
+                    MotorStatus(tempC = tempC, statorTempC = tempC, rawBytes = frame)
                 }
                 0x62 -> {
                     // Current (Amps) - direct value, divide by 1000
@@ -410,6 +437,43 @@ object TorqeedoProtocol {
         if (frame.last() == FOOTER && frame.size >= 5) {
             val addr = frame[1].toInt() and 0xFF
             val msgId = frame[2].toInt() and 0xFF
+
+            // New 17-byte INFO frame (motor response)
+            // Example: AC 00 00 00 06 FF FF 13 10 FF FB 01 47 01 40 1B AD
+            // Mapping verified via ArduPilot:
+            // Frame[3,4]   = RPM (s16)
+            // Frame[5,6]   = Power (u16)
+            // Frame[7,8]   = Voltage (u16) * 0.01
+            // Frame[9,10]  = Current (s16) * 0.1
+            // Frame[11,12] = PCB Temp (s16) * 0.1
+            // Frame[13,14] = Stator Temp (s16) * 0.1
+            if (frame.size == 17 && addr == MASTER_ADDR.toInt() and 0xFF && msgId == 0x00) {
+                val dataToCrc = frame.sliceArray(1 until 15)
+                val crcRx = frame[15]
+                if (crcRx == crc8Maxim(dataToCrc)) {
+                    val rpm = s16(frame[3], frame[4])
+                    val power = u16(frame[5], frame[6])
+                    val voltage = u16(frame[7], frame[8]) * 0.01f
+                    val current = s16(frame[9], frame[10]) * 0.1f
+                    val pcbTemp = s16(frame[11], frame[12]) * 0.1f
+                    val statorTemp = s16(frame[13], frame[14]) * 0.1f
+
+                    return MotorStatus(
+                        rpm = rpm,
+                        voltage = voltage,
+                        current = current,
+                        powerW = power,
+                        tempC = statorTemp,
+                        pcbTempC = pcbTemp,
+                        statorTempC = statorTemp,
+                        rawBytes = frame,
+                        destAddr = addr.toByte(),
+                        msgId = msgId.toByte()
+                    )
+                } else {
+                    log("INFO frame CRC mismatch: expected ${"%02X".format(crc8Maxim(dataToCrc))} got ${"%02X".format(crcRx)}")
+                }
+            }
 
             if (msgId == MSGID_DRIVE.toInt() and 0xFF && frame.size >= 9) {
                 val sHi = frame[5].toInt() and 0xFF
@@ -450,17 +514,17 @@ object TorqeedoProtocol {
         fun u16le(lo: Byte, hi: Byte): Int = (lo.toInt() and 0xFF) or ((hi.toInt() and 0xFF) shl 8)
         fun s16le(lo: Byte, hi: Byte): Int = u16le(lo, hi).toShort().toInt()
 
-        var rpm = 0; var voltage = 0f; var current = 0f; var powerW = 0; var tempC = 0; var errorCode = 0
+        var rpm = 0; var voltage = 0f; var current = 0f; var powerW = 0; var tempC = 0f; var errorCode = 0
 
         if (payload.size >= 7) {
             rpm = s16le(payload[1], payload[2])
             voltage = u16le(payload[3], payload[4]) / 10.0f
             current = s16le(payload[5], payload[6]) / 10.0f
             powerW = (voltage * current).toInt()
-            if (payload.size >= 8) tempC = payload[7].toInt() and 0xFF
+            if (payload.size >= 8) tempC = (payload[7].toInt() and 0xFF).toFloat()
             if (payload.size >= 9) errorCode = payload[8].toInt() and 0xFF
             log("Legacy status parsed: RPM=$rpm V=$voltage A=$current T=$tempC Err=$errorCode")
-            return MotorStatus(rpm = rpm, voltage = voltage, current = current, powerW = powerW, tempC = tempC, errorCode = errorCode, rawBytes = raw)
+            return MotorStatus(rpm = rpm, voltage = voltage, current = current, powerW = powerW, tempC = tempC, statorTempC = tempC, errorCode = errorCode, rawBytes = raw)
         }
         return null
     }
@@ -468,6 +532,8 @@ object TorqeedoProtocol {
     private fun u16(hi: Byte, lo: Byte): Int {
         return ((hi.toInt() and 0xFF) shl 8) or (lo.toInt() and 0xFF)
     }
+
+    private fun s16(hi: Byte, lo: Byte): Int = u16(hi, lo).toShort().toInt()
 
     private fun u16le(lo: Byte, hi: Byte): Int {
         return (lo.toInt() and 0xFF) or ((hi.toInt() and 0xFF) shl 8)
@@ -480,11 +546,11 @@ object TorqeedoProtocol {
      */
     fun parseSteerSensor(frame: ByteArray): SteerSensorData? {
         if (frame.size < 7 || (frame[0].toInt() and 0xFF) != 0xA8) return null
-        
+
         val sensorA = u16le(frame[1], frame[2])
         val sensorB = u16le(frame[3], frame[4])
         val vcc = u16le(frame[5], frame[6])
-        
+
         return SteerSensorData(sensorA, sensorB, vcc, frame)
     }
 

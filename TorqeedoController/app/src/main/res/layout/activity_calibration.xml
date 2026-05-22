@@ -167,6 +167,14 @@
                         android:fontFamily="sans-serif-medium"
                         android:layout_marginBottom="8dp" />
 
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/swUseKalman"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Use Kalman Filter (vs Complementary)"
+                        android:textColor="@color/text_primary"
+                        android:layout_marginBottom="8dp" />
+
                     <Button android:id="@+id/btnResetSFDegrees" style="@style/Widget.TorqeedoController.Button.Secondary"
                         android:layout_width="match_parent" android:layout_height="wrap_content"
                         android:text="Reset Degrees" android:layout_marginBottom="16dp" />

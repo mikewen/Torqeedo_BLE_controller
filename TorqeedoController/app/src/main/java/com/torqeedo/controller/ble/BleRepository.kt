@@ -192,6 +192,12 @@ object BleRepository : TextToSpeech.OnInitListener {
             }
         }
         
+        scope.launch {
+            manager.imuA1Data.collect {
+                lastGyroUpdateTime = System.currentTimeMillis()
+            }
+        }
+
         // Watch for slaveMode changes while connected
         scope.launch {
             slaveMode.collect { isSlave ->
@@ -220,6 +226,11 @@ object BleRepository : TextToSpeech.OnInitListener {
                 }
             }
         }
+        scope.launch {
+            manager.imuA1Data.collect {
+                lastGyroUpdateTime = System.currentTimeMillis()
+            }
+        }
     }
 
     private fun observeGpsConnection(manager: TorqeedoBleManager) {
@@ -230,6 +241,11 @@ object BleRepository : TextToSpeech.OnInitListener {
                     TorqeedoBleManager.ConnectionState.DISCONNECTED -> speak("G P S disconnected")
                     else -> {}
                 }
+            }
+        }
+        scope.launch {
+            manager.imuA1Data.collect {
+                lastGyroUpdateTime = System.currentTimeMillis()
             }
         }
     }
@@ -459,15 +475,9 @@ object BleRepository : TextToSpeech.OnInitListener {
             motorManager?.statusFlow?.collect { status ->
                 val dest = status.destAddr ?: return@collect
                 
-                // Watch for traffic addressed to relevant bus devices being polled by master
-                val isPolled = dest == TorqeedoProtocol.MASTER_ADDR ||
-                               dest == TorqeedoProtocol.REMOTE1_ADDR ||
-                               dest == TorqeedoProtocol.DISPLAY_ADDR ||
-                               dest == TorqeedoProtocol.MOTOR_ADDR ||
-                               dest == TorqeedoProtocol.BATTERY_ADDR
-                
-                if (isPolled) {
-                    // Update local state if it was a drive command (syncing with Master poll/command)
+                // Watch for Drive command TO the motor: AC 30 82
+                if (dest == TorqeedoProtocol.MOTOR_ADDR && status.msgId == TorqeedoProtocol.MSGID_DRIVE) {
+                    // Update local state to follow master speed
                     status.targetSpeed?.let { speed ->
                         if (speed >= 0) {
                             direction.value = Direction.FORWARD
@@ -478,9 +488,9 @@ object BleRepository : TextToSpeech.OnInitListener {
                         }
                     }
                     
-                    // Reply ASAP (requirement is within 25ms) using the "Remote (0x01)" identity
+                    // Reply ASAP (requirement is within 25ms) using Slave Response format
                     val replySpeed = currentSpeed.value
-                    motorManager?.sendDrive(replySpeed, TorqeedoProtocol.REMOTE_ADDR)
+                    motorManager?.sendSlaveResponse(replySpeed)
                 }
             }
         }
@@ -549,13 +559,19 @@ object BleRepository : TextToSpeech.OnInitListener {
             // INTEGRAL MANAGEMENT
             //--------------------------------------------------
             if (abs(error) > apDeadband) {
-                autopilotIntegral += effectiveError * apKi
+                autopilotIntegral += error * apKi
                 autopilotIntegral = autopilotIntegral.coerceIn(-AUTOPILOT_MAX_I, AUTOPILOT_MAX_I)
             } else {
                 // Slowly decay integral
-                autopilotIntegral *= 0.98f
+                //autopilotIntegral *= 0.98f
+                autopilotIntegral *= 0.85f
             }
-
+            if (
+                abs(error) < 0.3f &&
+                abs(yawRate) < 0.2f
+            ) {
+                autopilotIntegral *= 0.8f
+            }
             //--------------------------------------------------
             // GYRO YAW DAMPING
             //--------------------------------------------------
@@ -581,8 +597,11 @@ object BleRepository : TextToSpeech.OnInitListener {
             // Small deadband to avoid constant minor adjustments
             if (abs(delta) < 0.5f) delta = 0f
 
+            //val output = (currentOutput + delta).coerceIn(-100f, 100f)
             val output = (currentOutput + delta).coerceIn(-100f, 100f)
 
+            Log.d("AP","err=$error gyro=$yawRate damp=$yawDamping out=$rawOutput")
+            //Log.d("AP","rudder=${rudderPosition.value}")
             //--------------------------------------------------
             // APPLY OUTPUT
             //--------------------------------------------------

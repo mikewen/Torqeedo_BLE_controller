@@ -66,6 +66,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_AP_DELAY = "ap_delay"
         private const val KEY_USE_RUDDER_SENSOR = "use_rudder_sensor"
         private const val KEY_QMC_LPF = "qmc_lpf"
+        private const val KEY_SF_USE_KALMAN = "sf_use_kalman"
 
         private const val KEY_SF_MAG_BIAS_X = "sf_mag_bias_x"
         private const val KEY_SF_MAG_BIAS_Y = "sf_mag_bias_y"
@@ -113,6 +114,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _qmcLpfEnabled = MutableStateFlow(prefs.getBoolean(KEY_QMC_LPF, false))
     val qmcLpfEnabled: StateFlow<Boolean> = _qmcLpfEnabled.asStateFlow()
+
+    private val _useKalmanFilter = MutableStateFlow(prefs.getBoolean(KEY_SF_USE_KALMAN, false))
+    val useKalmanFilter: StateFlow<Boolean> = _useKalmanFilter.asStateFlow()
 
     private val _isSlaveMode = MutableStateFlow(prefs.getBoolean(KEY_SLAVE_MODE, false))
     val isSlaveMode: StateFlow<Boolean> = _isSlaveMode.asStateFlow()
@@ -309,6 +313,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         sensorFusion.gyroBiasX = prefs.getFloat(KEY_SF_GYRO_BIAS_X, 0f)
         sensorFusion.gyroBiasY = prefs.getFloat(KEY_SF_GYRO_BIAS_Y, 0f)
         sensorFusion.gyroBiasZ = prefs.getFloat(KEY_SF_GYRO_BIAS_Z, 0f)
+        sensorFusion.useKalman = prefs.getBoolean(KEY_SF_USE_KALMAN, false)
     }
 
     private fun loadSteerCalib() {
@@ -491,12 +496,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // Initialize declination from prefs
         sensorFusion.setDeclination(prefs.getFloat(KEY_DECLINATION, 0f))
+        sensorFusion.useKalman = _useKalmanFilter.value
 
         val processA1: (ByteArray) -> Unit = { frame ->
             if (frame.size >= 20) {
                 val now = System.currentTimeMillis()
                 val dt = if (lastA1Time > 0L) (now - lastA1Time) / 1000f else 0.02f
                 lastA1Time = now
+                BleRepository.lastGyroUpdateTime = now
                 val ax = readS16LE(frame, 2).toShort(); val ay = readS16LE(frame, 4).toShort(); val az = readS16LE(frame, 6).toShort()
                 val gx = readS16LE(frame, 8).toShort(); val gy = readS16LE(frame, 10).toShort(); val gz = readS16LE(frame, 12).toShort()
                 val mx = readS16LE(frame, 14).toShort(); val my = readS16LE(frame, 16).toShort(); val mz = readS16LE(frame, 18).toShort()
@@ -638,6 +645,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setShowMotorStatus(s: Boolean) = prefs.edit().putBoolean(KEY_SHOW_MOTOR_STATUS, s).apply().also { _showMotorStatus.value = s; BleRepository.showMotorStatus = s }
     fun setSteerScale(s: Int) = prefs.edit().putInt(KEY_STEER_SCALE, s).apply().also { _steerScale.value = s; BleRepository.steerScale = s }
     fun setQmcLpfEnabled(e: Boolean) = prefs.edit().putBoolean(KEY_QMC_LPF, e).apply().also { _qmcLpfEnabled.value = e }
+    fun setUseKalmanFilter(v: Boolean) { _useKalmanFilter.value = v; sensorFusion.useKalman = v; prefs.edit().putBoolean(KEY_SF_USE_KALMAN, v).apply(); sensorFusion.resetFilter(); speak("Kalman filter ${if(v) "enabled" else "disabled"}") }
     fun setSlaveMode(s: Boolean) = prefs.edit().putBoolean(KEY_SLAVE_MODE, s).apply().also { _isSlaveMode.value = s; BleRepository.slaveMode.value = s; speak("Slave mode ${if(s) "on" else "off"}") }
 
     fun connectToDevice(address: String) {
