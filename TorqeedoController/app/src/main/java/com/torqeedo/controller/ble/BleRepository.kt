@@ -345,15 +345,37 @@ object BleRepository : TextToSpeech.OnInitListener {
     fun adjustSteer(delta: Int) {
         if (delta == 0) return
 
-        // Safety: don't drive past physical limits if sensor is available
+        var safeDelta = delta
+
+        // Safety: Clamp the delta dynamically based on the current sensor position
+        val currentPos = rudderPosition.value
         if (useRudderSensor) {
-            if (delta > 0 && rudderPosition.value >= 99f) return
-            if (delta < 0 && rudderPosition.value <= -99f) return
+            // Predict future position if this delta is fully executed
+            val predictedPos = currentPos + delta
+
+            if (predictedPos > 99f) {
+                // Cap the positive movement so it stops exactly at 99f
+                safeDelta = (99f - currentPos).toInt().coerceAtLeast(0)
+            } else if (predictedPos < -99f) {
+                // Cap the negative movement so it stops exactly at -99f
+                safeDelta = (-99f - currentPos).toInt().coerceAtMost(0)
+            }
+        }
+
+        if (abs(currentPos) > 70f) {
+            safeDelta = safeDelta.coerceIn(-5, 5)
+        }
+
+        if (safeDelta == 0) {
+            // Force stop hardware if we are at or past the limit
+            motorManager?.sendSteer(0, 0)
+            return
         }
 
         val oldValue = steerValue.value
-        val newValue = (oldValue + delta).coerceIn(-STEER_MAX, STEER_MAX)
+        val newValue = (oldValue + safeDelta).coerceIn(-STEER_MAX, STEER_MAX)
         val actualDelta = newValue - oldValue
+
         if (actualDelta != 0) {
             steerValue.value = newValue
             val runtimeMs = abs(actualDelta) * steerScale
@@ -389,6 +411,7 @@ object BleRepository : TextToSpeech.OnInitListener {
                 stopAutoPilotLoop()
                 //resetSteer()
                 rudderPosition.value = 0.0f
+                useRudderSensor = false
             }
         }
         autoPilotActive.value = active
@@ -502,17 +525,25 @@ object BleRepository : TextToSpeech.OnInitListener {
     }
 
     private suspend fun syncRudderToTarget(target: Float) {
+        val RUDDER_LIMIT = 80f
         //todo: add turn off linear motor when target is reached or AP is turned off by sending steer command with timeMS=0
         val maxAttempts = 5
         for (i in 0 until maxAttempts) {
             // Allow exit if AP is turned off, unless we are resetting to zero
-            if (!autoPilotActive.value && target != 0f) break
+            if (!autoPilotActive.value && target != 0f) {
+                motorManager?.sendSteer(0, 0)
+                break
+            }
             
             val currentRudderPos = rudderPosition.value
 
             // Safety: stop if already at limit in the desired direction
-            if (currentRudderPos >= 99f && target > currentRudderPos) break
-            if (currentRudderPos <= -99f && target < currentRudderPos) break
+            //if (currentRudderPos >= 99f && target > currentRudderPos) break
+            //if (currentRudderPos <= -99f && target < currentRudderPos) break
+            if (abs(currentRudderPos) >= RUDDER_LIMIT) {
+                motorManager?.sendSteer(0, 0) //stopSteering, send Steer command with timeMS=0
+                break
+            }
 
             val rudderError = target - currentRudderPos
 
