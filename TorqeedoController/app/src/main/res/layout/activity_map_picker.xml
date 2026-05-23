@@ -35,6 +35,24 @@
             android:layout_marginStart="8dp" />
 
         <ImageButton
+            android:id="@+id/btnDownloadMap"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/stat_sys_download"
+            android:visibility="gone"
+            app:tint="@color/text_secondary" />
+
+        <ImageButton
+            android:id="@+id/btnToggleSatellite"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_mapmode"
+            android:layout_marginEnd="4dp"
+            app:tint="@color/text_secondary" />
+
+        <ImageButton
             android:id="@+id/btnCenterMap"
             android:layout_width="48dp"
             android:layout_height="48dp"

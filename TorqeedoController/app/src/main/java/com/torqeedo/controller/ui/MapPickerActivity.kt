@@ -1,6 +1,7 @@
 package com.torqeedo.controller.ui
 
 import android.os.Bundle
+import android.view.View
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.Toast
@@ -17,8 +18,11 @@ import com.torqeedo.controller.viewmodel.MainViewModel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.osmdroid.events.MapEventsReceiver
+import org.osmdroid.tileprovider.cachemanager.CacheManager
+import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
+import org.osmdroid.util.MapTileIndex
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
@@ -32,6 +36,23 @@ class MapPickerActivity : AppCompatActivity() {
     private var targetMarker: Marker? = null
     private val waypointMarkers = mutableListOf<Marker>()
     private var hasCenteredInitially = false
+    private var isSatellite = false
+
+    /**
+     * Google Hybrid Satellite source (Satellite + Roads).
+     * This provides reliable global coverage including Canada without an API key.
+     */
+    private val googleSatelliteSource = object : OnlineTileSourceBase(
+        "GoogleHybrid",
+        0, 20, 256, "",
+        arrayOf("https://mt0.google.com", "https://mt1.google.com", "https://mt2.google.com", "https://mt3.google.com")
+    ) {
+        override fun getTileURLString(pMapTileIndex: Long): String {
+            return getBaseUrl() + "/vt/lyrs=y&x=" + MapTileIndex.getX(pMapTileIndex) +
+                   "&y=" + MapTileIndex.getY(pMapTileIndex) +
+                   "&z=" + MapTileIndex.getZoom(pMapTileIndex)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,6 +100,26 @@ class MapPickerActivity : AppCompatActivity() {
             finish()
         }
 
+        binding.btnToggleSatellite.setOnClickListener {
+            isSatellite = !isSatellite
+            if (isSatellite) {
+                binding.mapView.setTileSource(googleSatelliteSource)
+                binding.btnToggleSatellite.setColorFilter(ContextCompat.getColor(this, R.color.accent_primary))
+                binding.btnDownloadMap.visibility = View.VISIBLE
+            } else {
+                binding.mapView.setTileSource(TileSourceFactory.MAPNIK)
+                binding.btnToggleSatellite.setColorFilter(ContextCompat.getColor(this, R.color.text_secondary))
+                binding.btnDownloadMap.visibility = View.GONE
+            }
+            binding.mapView.invalidate()
+        }
+
+        binding.btnDownloadMap.setOnClickListener {
+            if (isSatellite) {
+                showDownloadDialog()
+            }
+        }
+
         binding.btnCenterMap.setOnClickListener {
             vm.currentLocation.value?.let {
                 binding.mapView.controller.animateTo(it)
@@ -107,6 +148,45 @@ class MapPickerActivity : AppCompatActivity() {
                 .setNegativeButton("Cancel", null)
                 .show()
         }
+    }
+
+    private fun showDownloadDialog() {
+        val cacheManager = CacheManager(binding.mapView)
+        val boundingBox = binding.mapView.boundingBox
+        val zoom = binding.mapView.zoomLevelDouble.toInt()
+        
+        // Download current zoom level and next 2 for detail
+        val minZoom = zoom
+        val maxZoom = (zoom + 2).coerceAtMost(20)
+        
+        val tileCount = cacheManager.possibleTilesInArea(boundingBox, minZoom, maxZoom)
+        
+        AlertDialog.Builder(this)
+            .setTitle("Download Offline Satellite")
+            .setMessage("Download approximately $tileCount satellite tiles for the current visible area (Zoom $minZoom-$maxZoom)?")
+            .setPositiveButton("Download") { _, _ ->
+                cacheManager.downloadAreaAsync(this, boundingBox, minZoom, maxZoom, object : CacheManager.CacheManagerCallback {
+                    override fun onTaskComplete() {
+                        runOnUiThread {
+                            Toast.makeText(this@MapPickerActivity, "Download Complete", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    override fun onTaskFailed(errors: Int) {
+                        runOnUiThread {
+                            Toast.makeText(this@MapPickerActivity, "Download failed with $errors errors", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    override fun updateProgress(progress: Int, currentZoomLevel: Int, zoomLevelMin: Int, zoomLevelMax: Int) {}
+                    override fun downloadStarted() {
+                        runOnUiThread {
+                            Toast.makeText(this@MapPickerActivity, "Download Started...", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    override fun setPossibleTilesInArea(total: Int) {}
+                })
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun showSaveLocationDialog() {
