@@ -66,6 +66,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_MAG_CALIB_ZERO_DEG = "mag_calib_zero_deg"
         private const val KEY_MAG_CALIB_PORT_DEG = "mag_calib_port_deg"
         private const val KEY_MAG_CALIB_STBD_DEG = "mag_calib_stbd_deg"
+        private const val KEY_USE_ELLIPSE_CORRECTION = "use_ellipse_correction"
 
         private const val KEY_AP_KP = "ap_kp"
         private const val KEY_AP_KI = "ap_ki"
@@ -137,6 +138,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _useKalmanFilter = MutableStateFlow(false)
     val useKalmanFilter: StateFlow<Boolean> = _useKalmanFilter.asStateFlow()
+
+    private val _useEllipseCorrection = MutableStateFlow(false)
+    val useEllipseCorrection: StateFlow<Boolean> = _useEllipseCorrection.asStateFlow()
 
     private val _isSlaveMode = MutableStateFlow(false)
     val isSlaveMode: StateFlow<Boolean> = _isSlaveMode.asStateFlow()
@@ -256,8 +260,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     val magRudderPercentage: StateFlow<Float> = steerSensorAngle
 
-    private val _rawMagAngle = MutableStateFlow(0f)
-    val rawMagAngle: StateFlow<Float> = _rawMagAngle.asStateFlow()
+    val rawMagAngle: StateFlow<Float> = combine(_magX, _magY) { x, y ->
+        steerProcessor.getRawMagAngle(x, y)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0f)
+
     /**
      * High-level rudder position flow for the main application UI.
      */
@@ -345,6 +351,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _backLashTime.value = prefs.getInt(pKey(KEY_BACKLASH_TIME), 250)
         _qmcLpfEnabled.value = prefs.getBoolean(pKey(KEY_QMC_LPF), false)
         _useKalmanFilter.value = prefs.getBoolean(pKey(KEY_SF_USE_KALMAN), false)
+        _useEllipseCorrection.value = prefs.getBoolean(pKey(KEY_USE_ELLIPSE_CORRECTION), false)
         _isSlaveMode.value = prefs.getBoolean(pKey(KEY_SLAVE_MODE), false)
         _steerSensorType.value = SteerSensorType.valueOf(
             prefs.getString(pKey(KEY_STEER_SENSOR_TYPE), SteerSensorType.QMC6308.name) ?: SteerSensorType.QMC6308.name
@@ -368,6 +375,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _magEllipseResult.value = loadMagEllipse()
         
         steerProcessor.is1DMode = (_steerSensorType.value == SteerSensorType.VL53L0X)
+        steerProcessor.useEllipseCorrection = _useEllipseCorrection.value
         _magEllipseResult.value?.let { res ->
             steerProcessor.setEllipse(res.centerX, res.centerY, res.axisA, res.axisB, res.angle)
         }
@@ -470,9 +478,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (_steerSensorType.value == SteerSensorType.QMC6308) {
                     _steerSensorAngle.value = steerProcessor.calculateAngle(_magX.value, _magY.value)
                 }
-                
-                val rawAngle = Math.toDegrees(atan2(_magY.value.toDouble(), _magX.value.toDouble())).toFloat()
-                _rawMagAngle.value = rawAngle
             }
         }
     }
@@ -750,6 +755,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setBackLashTime(v: Int) { _backLashTime.value = v; prefs.edit().putInt(pKey(KEY_BACKLASH_TIME), v).apply(); BleRepository.backLashTime = v }
     fun setQmcLpfEnabled(e: Boolean) = prefs.edit().putBoolean(pKey(KEY_QMC_LPF), e).apply().also { _qmcLpfEnabled.value = e }
     fun setUseKalmanFilter(v: Boolean) { _useKalmanFilter.value = v; sensorFusion.useKalman = v; prefs.edit().putBoolean(pKey(KEY_SF_USE_KALMAN), v).apply(); sensorFusion.resetFilter(); speak("Kalman filter ${if(v) "enabled" else "disabled"}") }
+    fun setUseEllipseCorrection(v: Boolean) { _useEllipseCorrection.value = v; steerProcessor.useEllipseCorrection = v; prefs.edit().putBoolean(pKey(KEY_USE_ELLIPSE_CORRECTION), v).apply(); speak("Ellipse correction ${if(v) "enabled" else "disabled"}") }
     fun setSlaveMode(s: Boolean) = prefs.edit().putBoolean(pKey(KEY_SLAVE_MODE), s).apply().also { _isSlaveMode.value = s; BleRepository.slaveMode.value = s; speak("Slave mode ${if(s) "on" else "off"}") }
 
     fun setSteerSensorType(type: SteerSensorType) {

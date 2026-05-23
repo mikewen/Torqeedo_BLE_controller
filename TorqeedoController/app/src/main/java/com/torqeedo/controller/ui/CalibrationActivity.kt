@@ -84,6 +84,9 @@ class CalibrationActivity : AppCompatActivity() {
             vm.clearMagEllipseCalib()
             showSnack("Ellipse calibration cleared")
         }
+        binding.swUseEllipseCorrection.setOnCheckedChangeListener { _, isChecked ->
+            vm.setUseEllipseCorrection(isChecked)
+        }
 
         // Steer Calibration (Generic - reuses QMC or VL53 based on ViewModel logic)
         binding.btnCalibZero.setOnClickListener {
@@ -203,6 +206,7 @@ class CalibrationActivity : AppCompatActivity() {
                         binding.btnStopMagEllipse.isEnabled = isQmc
                         binding.btnSaveMagEllipse.isEnabled = isQmc
                         binding.btnClearMagEllipse.isEnabled = isQmc
+                        binding.swUseEllipseCorrection.isEnabled = isQmc
                     }
                 }
                 launch {
@@ -219,6 +223,14 @@ class CalibrationActivity : AppCompatActivity() {
                     vm.backLashTime.collectLatest { ms ->
                         if (binding.etBacklashTime.text.toString() != ms.toString()) {
                             binding.etBacklashTime.setText(ms.toString())
+                        }
+                    }
+                }
+
+                launch {
+                    vm.useEllipseCorrection.collectLatest { use ->
+                        if (binding.swUseEllipseCorrection.isChecked != use) {
+                            binding.swUseEllipseCorrection.isChecked = use
                         }
                     }
                 }

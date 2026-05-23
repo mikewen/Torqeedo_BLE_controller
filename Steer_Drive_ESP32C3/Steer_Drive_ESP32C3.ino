@@ -3,8 +3,7 @@ ESP32 QMC6308 Magnetometer + Linear Motor Controller (NimBLE, 8-Byte Packets)
 -----------------------------------------------------------------------------
 Features:
 - QMC6308 16-bit magnetometer via I2C (SDA=18, SCL=19)
-- Reads sensor at ~100 Hz, averages over 50 ms, applies LPF
-- BLE service 0xAE30, 8-byte notify packets on AE02 at 20 Hz
+- BLE service 0xAE30, 8-byte notify packets on AE02
 - AE03 = motor command write, AE10 = RS485 passthrough
 */
 #include <NimBLEDevice.h>
@@ -15,13 +14,12 @@ HardwareSerial DebugUart(2);
 // =====================================================
 // GPIO & I2C
 // =====================================================
-#define RS485_TX       21
-#define RS485_RX       17        // Changed from 19 to avoid SCL conflict
-#define PIN_I2C_SDA    18
-#define PIN_I2C_SCL    19
-//#define PIN_HIGH_DRIVE 5
-#define PIN_MOTOR_L    22
-#define PIN_MOTOR_R    23
+#define RS485_TX       13
+#define RS485_RX       12
+#define PIN_I2C_SDA    8
+#define PIN_I2C_SCL    9
+#define PIN_MOTOR_L    0
+#define PIN_MOTOR_R    1
 
 // =====================================================
 // QMC6308 Registers
@@ -217,10 +215,6 @@ void setup() {
     Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 100000);
     initQMC6308();
 
-    // GPIO5 High Drive
-    //pinMode(PIN_HIGH_DRIVE, OUTPUT);
-    //digitalWrite(PIN_HIGH_DRIVE, HIGH);
-
     // Motor Pins
     pinMode(PIN_MOTOR_L, OUTPUT);
     pinMode(PIN_MOTOR_R, OUTPUT);
@@ -264,7 +258,7 @@ void loop() {
         motorStopTime = 0;
     }
 
-    // ----- High-speed sensor reading (target 100 Hz) -----
+    // ----- High-speed sensor reading (target 80 Hz) -----
     if (micros() - lastReadTime >= READ_INTERVAL_US) {
         lastReadTime = micros();
 
@@ -315,4 +309,3 @@ void loop() {
         }
     }
 }
-

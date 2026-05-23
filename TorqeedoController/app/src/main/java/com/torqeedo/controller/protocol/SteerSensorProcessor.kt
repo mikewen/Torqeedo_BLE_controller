@@ -39,9 +39,10 @@ class SteerSensorProcessor {
 
     private var ellipseA: Float = 1.0f
     private var ellipseB: Float = 1.0f
-    private var ellipseTheta: Float = 0.0f
+    private var ellipseTheta: Float = 0.0f // Radians
 
     // Calibrated path in ADC/Mag/Distance space
+    // pathA stores the Sine-like component, pathB stores the Cosine-like component
     private val pathA = FloatArray(TABLE_SIZE)
     private val pathB = FloatArray(TABLE_SIZE)
     private val angleTable = FloatArray(TABLE_SIZE)
@@ -74,6 +75,7 @@ class SteerSensorProcessor {
             val angle = (i - center) * (200f / steps)
             angleTable[i] = angle
             val rad = Math.toRadians(angle.toDouble())
+            // pathA is Sine, pathB is Cosine
             pathA[i] = (sin(rad) * 1000.0).toFloat()
             pathB[i] = (cos(rad) * 1000.0).toFloat()
         }
@@ -105,58 +107,71 @@ class SteerSensorProcessor {
         resetTable()
     }
 
-    fun setEllipse(cx: Float, cy: Float, a: Float, b: Float, angle: Float) {
+    fun setEllipse(cx: Float, cy: Float, a: Float, b: Float, angleRadians: Float) {
         bias1 = cx.toInt()
         bias2 = cy.toInt()
         ellipseA = if (a > 0f) a else 1.0f
         ellipseB = if (b > 0f) b else 1.0f
-        ellipseTheta = Math.toRadians(angle.toDouble()).toFloat()
+        ellipseTheta = angleRadians
         rebuildTable()
     }
 
+    /**
+     * Transforms raw input (x, y) into a normalized space.
+     * Returns Pair(Sine-like, Cosine-like)
+     */
     private fun transform(x: Float, y: Float): Pair<Float, Float> {
         if (is1DMode) return Pair(x, 0f)
         
         val dx = x - bias1
         val dy = y - bias2
-        if (!useEllipseCorrection) return Pair(dx, dy)
+        
+        if (!useEllipseCorrection) {
+            // Default assumption: Y is Sine-like, X is Cosine-like
+            return Pair(dy, dx)
+        }
         
         val cosT = cos(ellipseTheta)
         val sinT = sin(ellipseTheta)
-        // Rotate to align with axes, then scale. Radius normalized to 1000.
-        val curA = ((dx * cosT + dy * sinT) / ellipseA) * 1000f
-        val curB = ((-dx * sinT + dy * cosT) / ellipseB) * 1000f
-        return Pair(curA, curB)
+        
+        // Rotate by -theta to align with axes, then scale.
+        // rotated_x (along axisA) = dx * cosT + dy * sinT (Cosine-like)
+        // rotated_y (along axisB) = -dx * sinT + dy * cosT (Sine-like)
+        
+        val sinePart = ((-dx * sinT + dy * cosT) / ellipseB) * 1000f
+        val cosinePart = ((dx * cosT + dy * sinT) / ellipseA) * 1000f
+        
+        return Pair(sinePart, cosinePart)
     }
 
     /**
      * Calculates the steering angle (percentage) from raw sensor inputs.
      */
-    fun calculateAngle(rawA: Int, rawB: Int): Float {
+    fun calculateAngle(rawX: Int, rawY: Int): Float {
         // Stage 1: Filter raw inputs
         if (firstSample) {
-            filteredA = rawA.toFloat()
-            filteredB = if (is1DMode) 0f else rawB.toFloat()
+            filteredA = rawX.toFloat()
+            filteredB = if (is1DMode) 0f else rawY.toFloat()
         } else {
-            filteredA += LPF_BETA_RAW * (rawA - filteredA)
+            filteredA += LPF_BETA_RAW * (rawX - filteredA)
             if (is1DMode) {
                 filteredB = 0f
             } else {
-                filteredB += LPF_BETA_RAW * (rawB - filteredB)
+                filteredB += LPF_BETA_RAW * (rawY - filteredB)
             }
         }
 
-        val (curA, curB) = transform(filteredA, filteredB)
+        val (sine, cosine) = transform(filteredA, filteredB)
         
         // Stage 2: Magnitude check (bypass for 1D)
         if (!is1DMode) {
-            val mag = sqrt(curA * curA + curB * curB)
+            val mag = sqrt(sine * sine + cosine * cosine)
             if (mag < MIN_MAGNITUDE) {
                 return filteredAngle 
             }
         }
 
-        val rawAngle = findAngleOnPath(curA, curB)
+        val rawAngle = findAngleOnPath(sine, cosine)
 
         // Stage 3: Angle Smoothing
         if (firstSample) {
@@ -172,6 +187,7 @@ class SteerSensorProcessor {
     /**
      * Finds the physical angle by projecting the current vector (a, b)
      * onto the nearest segment of the calibrated 2D path.
+     * (a) is Sine-like, (b) is Cosine-like to match pathA/pathB.
      */
     private fun findAngleOnPath(a: Float, b: Float): Float {
         var minSqDist = Float.MAX_VALUE
@@ -283,16 +299,16 @@ class SteerSensorProcessor {
      * Returns a raw magnetic angle for display/debug purposes.
      */
     fun getRawMagAngle(x: Int, y: Int): Float {
-        val (curA, curB) = transform(x.toFloat(), y.toFloat())
-        return Math.toDegrees(atan2(curB.toDouble(), curA.toDouble())).toFloat()
+        val (sine, cosine) = transform(x.toFloat(), y.toFloat())
+        return Math.toDegrees(atan2(sine.toDouble(), cosine.toDouble())).toFloat()
     }
 
     fun getPathA(): FloatArray = pathA.copyOf()
     fun getPathB(): FloatArray = pathB.copyOf()
     
     fun getRatio(rawA: Int, rawB: Int): Float {
-        val (a, b) = transform(rawA.toFloat(), rawB.toFloat())
-        val denom = if (abs(b) < 1.0f) (if (b < 0) -1.0f else 1.0f) else b
-        return a / denom
+        val (sine, cosine) = transform(rawA.toFloat(), rawB.toFloat())
+        val denom = if (abs(cosine) < 1.0f) (if (cosine < 0) -1.0f else 1.0f) else cosine
+        return sine / denom
     }
 }

@@ -399,36 +399,6 @@
                         </LinearLayout>
                     </LinearLayout>
 
-<!--                    <LinearLayout-->
-<!--                        android:id="@+id/layoutVl53Raw"-->
-<!--                        android:layout_width="match_parent"-->
-<!--                        android:layout_height="wrap_content"-->
-<!--                        android:orientation="vertical"-->
-<!--                        android:layout_marginBottom="12dp"-->
-<!--                        android:visibility="gone">-->
-<!--&lt;!&ndash;                        <TextView&ndash;&gt;-->
-<!--&lt;!&ndash;                            android:layout_width="wrap_content"&ndash;&gt;-->
-<!--&lt;!&ndash;                            android:layout_height="wrap_content"&ndash;&gt;-->
-<!--&lt;!&ndash;                            android:text="VL53L0X Distance"&ndash;&gt;-->
-<!--&lt;!&ndash;                            android:textColor="@color/text_secondary"&ndash;&gt;-->
-<!--&lt;!&ndash;                            android:textSize="10sp" />&ndash;&gt;-->
-<!--&lt;!&ndash;                        <TextView&ndash;&gt;-->
-<!--&lt;!&ndash;                            android:id="@+id/tvVl53Distance"&ndash;&gt;-->
-<!--&lt;!&ndash;                            android:layout_width="match_parent"&ndash;&gt;-->
-<!--&lt;!&ndash;                            android:layout_height="wrap_content"&ndash;&gt;-->
-<!--&lt;!&ndash;                            android:text="Distance: 0 mm"&ndash;&gt;-->
-<!--&lt;!&ndash;                            android:textColor="@color/text_primary"&ndash;&gt;-->
-<!--&lt;!&ndash;                            android:textSize="14sp" />&ndash;&gt;-->
-<!--&lt;!&ndash;                        <TextView&ndash;&gt;-->
-<!--&lt;!&ndash;                            android:id="@+id/tvRawVl53"&ndash;&gt;-->
-<!--&lt;!&ndash;                            android:layout_width="match_parent"&ndash;&gt;-->
-<!--&lt;!&ndash;                            android:layout_height="wrap_content"&ndash;&gt;-->
-<!--&lt;!&ndash;                            android:text="Raw: &#45;&#45;"&ndash;&gt;-->
-<!--&lt;!&ndash;                            android:textColor="@color/text_secondary"&ndash;&gt;-->
-<!--&lt;!&ndash;                            android:textSize="12sp"&ndash;&gt;-->
-<!--&lt;!&ndash;                            android:fontFamily="monospace" />&ndash;&gt;-->
-<!--                    </LinearLayout>-->
-
                     <TextView
                         android:id="@+id/tvRudderPos"
                         android:layout_width="match_parent"
@@ -489,15 +459,24 @@
                         android:layout_width="match_parent" android:layout_height="wrap_content"
                         android:text="Clear All Points" />
 
-                    <!-- DEPRECATED Ellipse Section -->
+                    <!-- Ellipse Section -->
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Ellipse Calibration (QMC Only - DEPRECATED)"
+                        android:text="Ellipse Calibration (QMC Only)"
                         android:textColor="@color/text_secondary"
                         android:textSize="10sp"
                         android:layout_marginTop="16dp"
                         android:layout_marginBottom="4dp" />
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/swUseEllipseCorrection"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Use Ellipse Normalization"
+                        android:textColor="@color/text_primary"
+                        android:layout_marginBottom="8dp" />
+
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
