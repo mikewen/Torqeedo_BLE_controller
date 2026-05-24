@@ -61,7 +61,7 @@ class AutoPilotActivity : AppCompatActivity() {
             startActivity(Intent(this, MapPickerActivity::class.java))
         }
 
-        // PID Tuning - Kp
+        // PID Tuning - Kp (Outer Loop)
         binding.sbKp.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) vm.setApKp(progress / 10f)
@@ -69,14 +69,6 @@ class AutoPilotActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
-        binding.etKp.setOnEditorActionListener { v, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_DONE) {
-                val value = v.text.toString().toFloatOrNull() ?: 0f
-                vm.setApKp(value.coerceIn(0f, 100f))
-                v.clearFocus()
-                true
-            } else false
-        }
         binding.etKp.doAfterTextChanged { s ->
             if (binding.etKp.hasFocus()) {
                 val value = s.toString().toFloatOrNull() ?: 0f
@@ -84,30 +76,7 @@ class AutoPilotActivity : AppCompatActivity() {
             }
         }
 
-        // PID Tuning - Ki
-        binding.sbKi.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) vm.setApKi(progress / 100f)
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-        binding.etKi.setOnEditorActionListener { v, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_DONE) {
-                val value = v.text.toString().toFloatOrNull() ?: 0f
-                vm.setApKi(value.coerceIn(0f, 10f))
-                v.clearFocus()
-                true
-            } else false
-        }
-        binding.etKi.doAfterTextChanged { s ->
-            if (binding.etKi.hasFocus()) {
-                val value = s.toString().toFloatOrNull() ?: 0f
-                vm.setApKi(value)
-            }
-        }
-
-        // PID Tuning - Kd
+        // PID Tuning - Kd (Inner P)
         binding.sbKd.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) vm.setApKd(progress / 10f)
@@ -115,18 +84,40 @@ class AutoPilotActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
-        binding.etKd.setOnEditorActionListener { v, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_DONE) {
-                val value = v.text.toString().toFloatOrNull() ?: 0f
-                vm.setApKd(value.coerceIn(0f, 100f))
-                v.clearFocus()
-                true
-            } else false
-        }
         binding.etKd.doAfterTextChanged { s ->
             if (binding.etKd.hasFocus()) {
                 val value = s.toString().toFloatOrNull() ?: 0f
                 vm.setApKd(value)
+            }
+        }
+
+        // PID Tuning - Ki (Inner I)
+        binding.sbKi.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) vm.setApKi(progress / 100f)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+        binding.etKi.doAfterTextChanged { s ->
+            if (binding.etKi.hasFocus()) {
+                val value = s.toString().toFloatOrNull() ?: 0f
+                vm.setApKi(value)
+            }
+        }
+
+        // PID Tuning - Kf (Feed Forward)
+        binding.sbKf.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) vm.setApKf(progress / 10f)
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+        binding.etKf.doAfterTextChanged { s ->
+            if (binding.etKf.hasFocus()) {
+                val value = s.toString().toFloatOrNull() ?: 0f
+                vm.setApKf(value)
             }
         }
 
@@ -138,14 +129,6 @@ class AutoPilotActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
-        binding.etDeadband.setOnEditorActionListener { v, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_DONE) {
-                val value = v.text.toString().toFloatOrNull() ?: 0f
-                vm.setApDeadband(value.coerceIn(0f, 10f))
-                v.clearFocus()
-                true
-            } else false
-        }
         binding.etDeadband.doAfterTextChanged { s ->
             if (binding.etDeadband.hasFocus()) {
                 val value = s.toString().toFloatOrNull() ?: 0f
@@ -161,14 +144,6 @@ class AutoPilotActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
-        binding.etMaxRate.setOnEditorActionListener { v, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_DONE) {
-                val value = v.text.toString().toFloatOrNull() ?: 0f
-                vm.setApMaxRate(value.coerceIn(0f, 100f))
-                v.clearFocus()
-                true
-            } else false
-        }
         binding.etMaxRate.doAfterTextChanged { s ->
             if (binding.etMaxRate.hasFocus()) {
                 val value = s.toString().toFloatOrNull() ?: 0f
@@ -184,14 +159,6 @@ class AutoPilotActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
-        binding.etDelay.setOnEditorActionListener { v, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_DONE) {
-                val value = v.text.toString().toLongOrNull() ?: 0L
-                vm.setApDelay(value.coerceIn(0L, 1000L))
-                v.clearFocus()
-                true
-            } else false
-        }
         binding.etDelay.doAfterTextChanged { s ->
             if (binding.etDelay.hasFocus()) {
                 val value = s.toString().toLongOrNull() ?: 0L
@@ -301,6 +268,13 @@ class AutoPilotActivity : AppCompatActivity() {
                     vm.apKd.collectLatest { kd ->
                         if (!binding.etKd.hasFocus()) binding.etKd.setText("%.1f".format(kd))
                         binding.sbKd.progress = (kd * 10).toInt()
+                    }
+                }
+
+                launch {
+                    vm.apKf.collectLatest { kf ->
+                        if (!binding.etKf.hasFocus()) binding.etKf.setText("%.1f".format(kf))
+                        binding.sbKf.progress = (kf * 10).toInt()
                     }
                 }
 

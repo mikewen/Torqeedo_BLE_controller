@@ -71,6 +71,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val KEY_AP_KP = "ap_kp"
         private const val KEY_AP_KI = "ap_ki"
         private const val KEY_AP_KD = "ap_kd"
+        private const val KEY_AP_KF = "ap_kf"
         private const val KEY_AP_DEADBAND = "ap_deadband"
         private const val KEY_AP_MAX_RATE = "ap_max_rate"
         private const val KEY_AP_DELAY = "ap_delay"
@@ -87,6 +88,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val DEFAULT_AP_KP = 2.5f
         private const val DEFAULT_AP_KI = 0.1f
         private const val DEFAULT_AP_KD = 1.0f
+        private const val DEFAULT_AP_KF = 0.5f
         private const val DEFAULT_AP_DEADBAND = 3.0f
         private const val DEFAULT_AP_MAX_RATE = 25f
         private const val DEFAULT_AP_DELAY = 200L
@@ -294,6 +296,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val apKi: StateFlow<Float> = _apKi.asStateFlow()
     private val _apKd = MutableStateFlow(DEFAULT_AP_KD)
     val apKd: StateFlow<Float> = _apKd.asStateFlow()
+    private val _apKf = MutableStateFlow(DEFAULT_AP_KF)
+    val apKf: StateFlow<Float> = _apKf.asStateFlow()
     private val _apDeadband = MutableStateFlow(DEFAULT_AP_DEADBAND)
     val apDeadband: StateFlow<Float> = _apDeadband.asStateFlow()
     private val _apMaxRate = MutableStateFlow(DEFAULT_AP_MAX_RATE)
@@ -367,6 +371,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _apKp.value = prefs.getFloat(pKey(KEY_AP_KP), DEFAULT_AP_KP)
         _apKi.value = prefs.getFloat(pKey(KEY_AP_KI), DEFAULT_AP_KI)
         _apKd.value = prefs.getFloat(pKey(KEY_AP_KD), DEFAULT_AP_KD)
+        _apKf.value = prefs.getFloat(pKey(KEY_AP_KF), DEFAULT_AP_KF)
         _apDeadband.value = prefs.getFloat(pKey(KEY_AP_DEADBAND), DEFAULT_AP_DEADBAND)
         _apMaxRate.value = prefs.getFloat(pKey(KEY_AP_MAX_RATE), DEFAULT_AP_MAX_RATE)
         _apDelay.value = prefs.getLong(pKey(KEY_AP_DELAY), DEFAULT_AP_DELAY)
@@ -389,6 +394,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         BleRepository.apKp = _apKp.value
         BleRepository.apKi = _apKi.value
         BleRepository.apKd = _apKd.value
+        BleRepository.apKf = _apKf.value
         BleRepository.apDeadband = _apDeadband.value
         BleRepository.maxTurnRate = _apMaxRate.value
         BleRepository.autoPilotDelay = _apDelay.value
@@ -441,7 +447,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { BleRepository.targetHeading.collect { sensorFusion.resetFilter() } }
         
         viewModelScope.launch { trueHeading.collect { BleRepository.trueHeading.value = it } }
-        viewModelScope.launch { rudderPosition.collect { BleRepository.rudderPosition.value = it } }
+        viewModelScope.launch { rudderPosition.collect { 
+            BleRepository.rudderPosition.value = it 
+            BleRepository.lastRudderUpdateTime = System.currentTimeMillis()
+        } }
     }
 
     private fun setupMagnetometer() {
@@ -943,6 +952,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setApKp(v: Float) { _apKp.value = v; prefs.edit().putFloat(pKey(KEY_AP_KP), v).apply(); BleRepository.apKp = v }
     fun setApKi(v: Float) { _apKi.value = v; prefs.edit().putFloat(pKey(KEY_AP_KI), v).apply(); BleRepository.apKi = v }
     fun setApKd(v: Float) { _apKd.value = v; prefs.edit().putFloat(pKey(KEY_AP_KD), v).apply(); BleRepository.apKd = v }
+    fun setApKf(v: Float) { _apKf.value = v; prefs.edit().putFloat(pKey(KEY_AP_KF), v).apply(); BleRepository.apKf = v }
     fun setApDeadband(v: Float) { _apDeadband.value = v; prefs.edit().putFloat(pKey(KEY_AP_DEADBAND), v).apply(); BleRepository.apDeadband = v }
     fun setApMaxRate(v: Float) { _apMaxRate.value = v; prefs.edit().putFloat(pKey(KEY_AP_MAX_RATE), v).apply(); BleRepository.maxTurnRate = v }
     fun setApDelay(v: Long) { _apDelay.value = v; prefs.edit().putLong(pKey(KEY_AP_DELAY), v).apply(); BleRepository.autoPilotDelay = v }

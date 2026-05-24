@@ -38,7 +38,8 @@ object BleRepository : TextToSpeech.OnInitListener {
     const val STEER_MAX = 100
     private const val STATUS_QUERY_DELAY = 500L
     private const val STEER_REPEAT_DELAY = 80L
-    private const val AUTOPILOT_MAX_I = 20f
+    private const val AUTOPILOT_MAX_I = 40f
+    private const val SENSOR_TIMEOUT_MS = 1500L
 
     // --- Shared Control State ---
     val speedMagnitude = MutableStateFlow(0)
@@ -59,6 +60,7 @@ object BleRepository : TextToSpeech.OnInitListener {
     val gyroZDegS = MutableStateFlow(0f)
     var lastGyroUpdateTime = 0L
     val rudderPosition = MutableStateFlow(0f)
+    var lastRudderUpdateTime = 0L
     val sensorCurrent = MutableStateFlow(0f)
 
     // --- Configurable Parameters (Synced from ViewModels/Prefs) ---
@@ -67,18 +69,18 @@ object BleRepository : TextToSpeech.OnInitListener {
     var throttleDelay = 200L
     var steerScale = 200
     var backLashTime = 250
-    var apKp = 2.5f
-    var apKi = 0.1f
-    var apKd = 1.0f
+    var apKp = 2.5f      // Outer Loop: Heading Error -> Target Rate
+    var apKi = 0.1f      // Inner Loop: Rate Error Integral
+    var apKd = 1.0f      // Inner Loop: Rate Error Proportional (Provides Damping)
+    var apKf = 0.5f      // Inner Loop: Target Rate Feed-Forward
     var apDeadband = 3.0f
     var maxTurnRate = 12f
-    var autoPilotDelay = 500L
+    var autoPilotDelay = 200L
     var useRudderSensor = false
     var showMotorStatus = false
     var enableVoicePrompts = true
 
     // --- PID Internal State ---
-    private var autopilotLastError = 0f
     private var autopilotIntegral = 0f
     private var isUpdatingAutoPilot = false
 
@@ -87,28 +89,18 @@ object BleRepository : TextToSpeech.OnInitListener {
     val voiceCommand = _voiceCommand.asSharedFlow()
     
     fun initTts(context: Context) {
-        if (tts == null) {
-            tts = TextToSpeech(context.applicationContext, this)
-        }
+        if (tts == null) tts = TextToSpeech(context.applicationContext, this)
     }
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts?.language = Locale.US
             ttsReady = true
-        } else {
-            Log.e(TAG, "TTS Initialization failed")
         }
     }
 
     fun speak(text: String) {
-        if (enableVoicePrompts) {
-            if (ttsReady) {
-                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "voice_prompt")
-            } else {
-                Log.w(TAG, "TTS not ready yet: $text")
-            }
-        }
+        if (enableVoicePrompts && ttsReady) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "voice_prompt")
         _voiceCommand.tryEmit(text)
     }
 
@@ -128,10 +120,8 @@ object BleRepository : TextToSpeech.OnInitListener {
     // --- Navigation State ---
     private val _targetLocation = MutableStateFlow<GeoPoint?>(null)
     val targetLocation: StateFlow<GeoPoint?> = _targetLocation.asStateFlow()
-
     private val _targetName = MutableStateFlow<String?>(null)
     val targetName: StateFlow<String?> = _targetName.asStateFlow()
-
     private val _waypoints = MutableStateFlow<List<Waypoint>>(emptyList())
     val waypoints: StateFlow<List<Waypoint>> = _waypoints.asStateFlow()
     private val _currentLocation = MutableStateFlow<GeoPoint?>(null)
@@ -254,15 +244,10 @@ object BleRepository : TextToSpeech.OnInitListener {
     // --- Control Logic ---
 
     fun setDirection(dir: Direction) {
-        if (direction.value != dir) {
-            direction.value = dir
-            speak(dir.name.lowercase(Locale.US))
-        }
+        if (direction.value != dir) { direction.value = dir; speak(dir.name.lowercase(Locale.US)) }
     }
 
-    fun setSpeedMagnitude(mag: Int) {
-        speedMagnitude.value = mag.coerceIn(SPEED_MIN, SPEED_MAX)
-    }
+    fun setSpeedMagnitude(mag: Int) { speedMagnitude.value = mag.coerceIn(SPEED_MIN, SPEED_MAX) }
 
     fun increaseSpeed() {
         if (direction.value == Direction.FORWARD) {
@@ -332,25 +317,23 @@ object BleRepository : TextToSpeech.OnInitListener {
         //if (!useRudderSensor) return
         val startPos = rudderPosition.value
         val startTime = System.currentTimeMillis()
-
-        while (System.currentTimeMillis() - startTime < 400) {
-
-            motorManager?.sendSteer(direction, 100)
-            Thread.sleep(20)
-
-            val movement = (rudderPosition.value - startPos) * direction
-
-            if (movement > 1.0f) {
-                break
+        // Hardware kick: non-blocking safety loop
+        scope.launch {
+            var elapsed = 0L
+            while (elapsed < 400) {
+                motorManager?.sendSteer(direction, 100)
+                delay(20)
+                elapsed += 20
+                if (abs(rudderPosition.value - startPos) > 1.5f) break
             }
+            motorManager?.sendSteer(0, 0)
         }
-        motorManager?.sendSteer(0, 0)
     }
+
     private fun executeSteerChange(targetValue: Int, customScale: Int) {
         val clampedTarget = targetValue.coerceIn(-STEER_MAX, STEER_MAX)
         val oldValue = steerValue.value
         var delta = clampedTarget - oldValue
-
         if (delta == 0) return
 
         // 1. Safety Look-Ahead Capping
@@ -497,7 +480,6 @@ object BleRepository : TextToSpeech.OnInitListener {
     fun setAutoPilotActive(active: Boolean) {
         if (active) {
             targetHeading.value = trueHeading.value
-            autopilotLastError = 0f
             autopilotIntegral = 0f
             useRudderSensor = true
             speak("Auto pilot on, heading ${targetHeading.value.toInt()} degrees")
@@ -548,7 +530,7 @@ object BleRepository : TextToSpeech.OnInitListener {
             }
         }
     }
-    
+
     private fun stopThrottleLoop() {
         throttleJob?.cancel()
         throttleJob = null
@@ -567,7 +549,7 @@ object BleRepository : TextToSpeech.OnInitListener {
             }
         }
     }
-    
+
     private fun stopStatusQueryLoop() {
         statusQueryJob?.cancel()
         statusQueryJob = null
@@ -587,14 +569,14 @@ object BleRepository : TextToSpeech.OnInitListener {
         autoPilotJob?.cancel()
         autoPilotJob = null
     }
-    
+
     private fun startSlaveLoop() {
         if (slaveJob?.isActive == true) return
         slaveJob = scope.launch {
             // Listen to incoming drive commands and status queries, then respond ASAP (Reactive)
             motorManager?.statusFlow?.collect { status ->
                 val dest = status.destAddr ?: return@collect
-                
+
                 // Watch for Drive command TO the motor: AC 30 82
                 if (dest == TorqeedoProtocol.MOTOR_ADDR && status.msgId == TorqeedoProtocol.MSGID_DRIVE) {
                     // Update local state to follow master speed
@@ -607,7 +589,7 @@ object BleRepository : TextToSpeech.OnInitListener {
                             speedMagnitude.value = -speed
                         }
                     }
-                    
+
                     // Reply ASAP (requirement is within 25ms) using Slave Response format
                     val replySpeed = currentSpeed.value
                     motorManager?.sendSlaveResponse(replySpeed)
@@ -615,7 +597,7 @@ object BleRepository : TextToSpeech.OnInitListener {
             }
         }
     }
-    
+
     private fun stopSlaveLoop() {
         slaveJob?.cancel()
         slaveJob = null
@@ -656,87 +638,110 @@ object BleRepository : TextToSpeech.OnInitListener {
         adjustSteer(step, customScale = autopilotSteerScale)
     }
 
+    /**
+     * Cascaded PID with Feed-Forward.
+     * Outer Loop: Heading Error -> Target Yaw Rate
+     * Inner Loop: Yaw Rate Error -> Rudder Command
+     * Feed-Forward: Target Yaw Rate -> Rudder Command (anticipatory)
+     */
     private suspend fun updateAutoPilot() {
-        if (isUpdatingAutoPilot) return
-        if (!autoPilotActive.value) return
-        
+        if (isUpdatingAutoPilot || !autoPilotActive.value) {
+            return
+        }
         isUpdatingAutoPilot = true
         try {
-            val apKrate = 1.2f
-            val maxStepPerUpdate = maxTurnRate * (autoPilotDelay / 1000f)
-
-            val current = trueHeading.value
-            val target = targetHeading.value
-            val yawRate = gyroZDegS.value
-
-            var error = target - current
-            while (error > 180f) error -= 360f
-            while (error < -180f) error += 360f
+            val dt = autoPilotDelay / 1000f
+            val currentHeading = trueHeading.value
+            val targetHeading = targetHeading.value
+            val currentYawRate = gyroZDegS.value
+            val isMoving = speedMagnitude.value > 50
 
             //--------------------------------------------------
-            // SOFT DEADBAND
+            // 1. HEADING ERROR CALCULATION
             //--------------------------------------------------
-            val effectiveError = if (abs(error) < apDeadband) {
-                error * 0.2f
-            } else {
-                sign(error) * (abs(error) - apDeadband)
+            var headingError = targetHeading - currentHeading
+            while (headingError > 180f) {
+                headingError -= 360f
+            }
+            while (headingError < -180f) {
+                headingError += 360f
             }
 
             //--------------------------------------------------
-            // INTEGRAL MANAGEMENT
+            // 2. OUTER LOOP (HEADING -> RATE) SOFT DEADBAND
             //--------------------------------------------------
-            if (abs(error) > apDeadband) {
-                autopilotIntegral += error * apKi
-                autopilotIntegral = autopilotIntegral.coerceIn(-AUTOPILOT_MAX_I, AUTOPILOT_MAX_I)
+            // Convert heading error into a target turn speed (deg/s)
+            val effectiveHdgError = if (abs(headingError) < apDeadband) {
+                headingError * 0.1f
             } else {
-                // Slowly decay integral
-                //autopilotIntegral *= 0.98f
-                autopilotIntegral *= 0.85f
+                sign(headingError) * (abs(headingError) - apDeadband)
             }
-            if (
-                abs(error) < 0.3f &&
-                abs(yawRate) < 0.2f
-            ) {
-                autopilotIntegral *= 0.8f
-            }
-            //--------------------------------------------------
-            // GYRO YAW DAMPING
-            //--------------------------------------------------
-            val gyroAvailable = (System.currentTimeMillis() - lastGyroUpdateTime) < 500
-            val yawDamping = if (gyroAvailable) yawRate * apKrate else 0f
+
+            val targetYawRate = (effectiveHdgError * apKp).coerceIn(-maxTurnRate, maxTurnRate)
 
             //--------------------------------------------------
-            // MAIN CONTROL LAW
+            // 3. INNER LOOP (RATE ERROR) / GYRO YAW DAMPING
             //--------------------------------------------------
-            val rawOutput = (effectiveError * apKp) + autopilotIntegral - yawDamping
+            val gyroFresh = (System.currentTimeMillis() - lastGyroUpdateTime) < 1000L
+            val actualYawRate = if (gyroFresh) gyroZDegS.value else 0f
+
+            // Difference between how fast we WANT to turn vs how fast we ARE turning
+            // Note: apKd now controls the core 'Yaw Damping' effect.
+            // Higher Kd = stronger resistance to unwanted rotations (waves/gusts).
+            val rateError = targetYawRate - actualYawRate
 
             //--------------------------------------------------
-            // OUTPUT LIMIT
+            // 4. RATE INTEGRAL (Inner Loop I)
             //--------------------------------------------------
-            val targetOutput = rawOutput.coerceIn(-100f, 100f)
-
-            //--------------------------------------------------
-            // STEERING SLEW RATE LIMITER
-            //--------------------------------------------------
-            val currentOutput = if (useRudderSensor) rudderPosition.value else steerValue.value.toFloat()
-            var delta = (targetOutput - currentOutput).coerceIn(-maxStepPerUpdate, maxStepPerUpdate)
-
-            // Small deadband to avoid constant minor adjustments
-            if (abs(delta) < 0.5f) delta = 0f
-
-            //val output = (currentOutput + delta).coerceIn(-100f, 100f)
-            val output = (currentOutput + delta).coerceIn(-100f, 100f)
-
-            Log.d("AP","err=$error gyro=$yawRate damp=$yawDamping out=$rawOutput")
-            //Log.d("AP","rudder=${rudderPosition.value}")
-            //--------------------------------------------------
-            // APPLY OUTPUT
-            //--------------------------------------------------
-            if (useRudderSensor) {
-                syncRudderToTarget(output)
+            // Build up rudder angle to counter persistent wind or current
+            if (isMoving && abs(headingError) > apDeadband * 0.5f) {
+                autopilotIntegral = (autopilotIntegral + rateError * apKi * dt).coerceIn(-AUTOPILOT_MAX_I, AUTOPILOT_MAX_I)
             } else {
+                autopilotIntegral *= 0.8f // Decay integral near target
+            }
+
+            //--------------------------------------------------
+            // 5. FEED-FORWARD (Inner Loop F)
+            //--------------------------------------------------
+            // Provides immediate rudder punch based on target turn rate
+            val feedForward = if (isMoving) {
+                targetYawRate * apKf
+            } else {
+                0f
+            }
+
+            //--------------------------------------------------
+            // 6. MAIN CONTROL LAW (Inner Loop P)
+            //--------------------------------------------------
+            // Note: (rateError * apKd) provides the core GYRO YAW DAMPING effect.
+            // As ActualYawRate increases, Output decreases, resisting the rotation.
+            val targetRudder = (rateError * apKd) + autopilotIntegral + feedForward
+            val finalRudder = targetRudder.coerceIn(-100f, 100f)
+
+            Log.d(TAG, "AP: hdgErr=${"%.1f".format(headingError)} targetRate=${"%.1f".format(targetYawRate)} gyro=${"%.1f".format(currentYawRate)} rudder=${"%.0f".format(finalRudder)}")
+
+            //--------------------------------------------------
+            // 7. HARDWARE DISPATCH (With Safety Watchdog)
+            //--------------------------------------------------
+            val sensorFresh = (System.currentTimeMillis() - lastRudderUpdateTime) < SENSOR_TIMEOUT_MS
+            if (useRudderSensor && sensorFresh) {
+                // Closed-Loop mode: Precise positioning using 0xA5 sensor
+                syncRudderToTarget(finalRudder)
+            } else {
+                // Open-Loop mode fallback: Timed pulses (used if sensor is OFF or NO DATA)
+                if (useRudderSensor && !sensorFresh) {
+                    Log.w(TAG, "Rudder sensor timeout! Falling back to open-loop.")
+                }
+                val currentSteer = steerValue.value.toFloat()
+                var delta = (finalRudder - currentSteer).coerceIn(-20f, 20f)
+
+                // Small deadband to avoid constant minor adjustments
+                if (abs(delta) < 0.5f) {
+                    delta = 0f
+                }
+
                 if (abs(delta) >= 1.0f) {
-                    setSteerValue(output.toInt())
+                    setSteerValue((currentSteer + delta).toInt())
                 }
             }
         } finally {
@@ -799,7 +804,7 @@ object BleRepository : TextToSpeech.OnInitListener {
                     startSteerRepeat(1)
                 }
                 LookbonRemote.Command.STOP_STEER -> stopSteerRepeat()
-                
+
                 LookbonRemote.Command.DOUBLE_STEER_LEFT -> {
                     speak("Hard left")
                     // If a single click already happened (1), we add 4 more to make it 5.
@@ -841,7 +846,7 @@ object BleRepository : TextToSpeech.OnInitListener {
     fun setWaypoints(list: List<Waypoint>) {
         _waypoints.value = list
     }
-    
+
     fun setCurrentLocation(loc: GeoPoint?) {
         _currentLocation.value = loc
     }
